@@ -51,7 +51,7 @@ export function RoomCell({
 
   return (
     <div className={cn(
-      "relative flex flex-col items-center justify-between w-full h-full min-h-[280px] sm:min-h-[300px] border-8 rounded-2xl overflow-hidden cartoon-shadow p-2 pt-6 transition-all duration-300",
+      "relative flex flex-col items-center justify-between w-full h-full min-h-[360px] sm:min-h-[420px] border-8 rounded-2xl overflow-hidden cartoon-shadow p-2 pt-6 transition-all duration-300",
       isLocal ? "border-primary bg-primary/10" : "border-wood-dark bg-wood-light"
     )}>
       {/* Wall Texture */}
@@ -60,7 +60,7 @@ export function RoomCell({
       {/* Video & Avatar Container */}
       <div className="relative z-10 flex flex-col items-center flex-1 w-full mt-2">
         {/* Webcam Oval */}
-        <div className="relative w-28 h-28 sm:w-32 sm:h-32 mb-4">
+        <div className="relative w-44 h-44 sm:w-52 sm:h-52 mb-4">
           <div className={cn(
             "w-full h-full rounded-full border-4 border-foreground overflow-hidden bg-background cartoon-shadow-hover",
             !isMuted && stream && "animate-pulse-ring" // Show pulse if they might be practicing
