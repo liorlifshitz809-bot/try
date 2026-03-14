@@ -1,0 +1,128 @@
+import { WebSocketServer, WebSocket } from "ws";
+
+interface PeerInfo {
+  ws: WebSocket;
+  peerId: string;
+  roomId: string;
+  displayName: string;
+  avatarIndex: number;
+}
+
+const rooms = new Map<string, Map<string, PeerInfo>>();
+
+function broadcast(roomId: string, data: object, excludePeerId?: string) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const message = JSON.stringify(data);
+  for (const [peerId, peer] of room) {
+    if (peerId !== excludePeerId && peer.ws.readyState === WebSocket.OPEN) {
+      peer.ws.send(message);
+    }
+  }
+}
+
+export function setupSignaling(wss: WebSocketServer) {
+  wss.on("connection", (ws: WebSocket) => {
+    let currentPeer: PeerInfo | null = null;
+
+    ws.on("message", (raw) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+
+      const type = msg.type as string;
+
+      if (type === "join") {
+        const { roomId, peerId, displayName, avatarIndex } = msg as {
+          roomId: string;
+          peerId: string;
+          displayName: string;
+          avatarIndex: number;
+        };
+
+        if (!rooms.has(roomId)) {
+          rooms.set(roomId, new Map());
+        }
+        const room = rooms.get(roomId)!;
+
+        currentPeer = { ws, peerId, roomId, displayName, avatarIndex };
+        room.set(peerId, currentPeer);
+
+        const existingPeers = Array.from(room.values())
+          .filter((p) => p.peerId !== peerId)
+          .map((p) => ({
+            peerId: p.peerId,
+            displayName: p.displayName,
+            avatarIndex: p.avatarIndex,
+          }));
+
+        ws.send(
+          JSON.stringify({
+            type: "room-joined",
+            roomId,
+            peers: existingPeers,
+          }),
+        );
+
+        broadcast(
+          roomId,
+          {
+            type: "peer-joined",
+            peerId,
+            displayName,
+            avatarIndex,
+          },
+          peerId,
+        );
+
+        console.log(`Peer ${peerId} (${displayName}) joined room ${roomId}. Room size: ${room.size}`);
+      } else if (type === "signal") {
+        const { targetPeerId, signal, fromPeerId } = msg as {
+          targetPeerId: string;
+          signal: unknown;
+          fromPeerId: string;
+        };
+        const roomId = currentPeer?.roomId ?? (msg.roomId as string);
+        const room = rooms.get(roomId);
+        const target = room?.get(targetPeerId);
+        if (target && target.ws.readyState === WebSocket.OPEN) {
+          target.ws.send(
+            JSON.stringify({ type: "signal", fromPeerId, targetPeerId, roomId, signal }),
+          );
+        }
+      } else if (type === "ping") {
+        ws.send(JSON.stringify({ type: "pong" }));
+      }
+    });
+
+    ws.on("close", () => {
+      if (!currentPeer) return;
+      const { roomId, peerId, displayName } = currentPeer;
+      const room = rooms.get(roomId);
+      if (room) {
+        room.delete(peerId);
+        if (room.size === 0) {
+          rooms.delete(roomId);
+        } else {
+          broadcast(roomId, { type: "peer-left", peerId, displayName });
+        }
+      }
+      console.log(`Peer ${peerId} left room ${roomId}`);
+    });
+
+    ws.on("error", (err) => {
+      console.error("WebSocket error:", err.message);
+    });
+  });
+}
+
+export function getRoomParticipantCount(roomId: string): number {
+  return rooms.get(roomId)?.size ?? 0;
+}
+
+export function roomExists(roomId: string): boolean {
+  return rooms.has(roomId);
+}

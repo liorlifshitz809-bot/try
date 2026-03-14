@@ -2,7 +2,7 @@
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+pnpm workspace monorepo using TypeScript. Piano Conservatory — a multi-pianist online video practice app with cartoon-style practice rooms, WebRTC peer-to-peer video, and a playful conservatory UI.
 
 ## Stack
 
@@ -15,82 +15,93 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
+- **WebSockets**: `ws` library (signaling server for WebRTC)
+- **WebRTC**: Native browser RTCPeerConnection (no dependencies)
+- **Frontend**: React + Vite, Tailwind CSS v4, Framer Motion
+
+## Features
+
+- Cartoon conservatory building with a grid of practice rooms
+- Each room shows a pianist avatar + live webcam video in a circular frame
+- WebRTC peer-to-peer video/audio via a WebSocket signaling server
+- Mute/unmute microphone, toggle camera on/off
+- Share room via a link (shareable URL)
+- Playful humorous UI: sleeping cat in empty rooms, 🤫 mute badge, room number plates
+- 8 cartoon animal/character avatars to choose from
 
 ## Structure
 
 ```text
 artifacts-monorepo/
 ├── artifacts/              # Deployable applications
-│   └── api-server/         # Express API server
+│   ├── api-server/         # Express API server + WebSocket signaling
+│   └── piano-conservatory/ # React + Vite frontend
 ├── lib/                    # Shared libraries
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
 │   ├── api-client-react/   # Generated React Query hooks
 │   ├── api-zod/            # Generated Zod schemas from OpenAPI
 │   └── db/                 # Drizzle ORM schema + DB connection
-├── scripts/                # Utility scripts (single workspace package)
-│   └── src/                # Individual .ts scripts, run via `pnpm --filter @workspace/scripts run <script>`
-├── pnpm-workspace.yaml     # pnpm workspace (artifacts/*, lib/*, lib/integrations/*, scripts)
-├── tsconfig.base.json      # Shared TS options (composite, bundler resolution, es2022)
-├── tsconfig.json           # Root TS project references
-└── package.json            # Root package with hoisted devDeps
+├── scripts/                # Utility scripts
+├── pnpm-workspace.yaml
+├── tsconfig.base.json
+├── tsconfig.json
+└── package.json
 ```
+
+## Key Files
+
+- `artifacts/api-server/src/signaling.ts` — WebSocket signaling server for WebRTC
+- `artifacts/api-server/src/routes/rooms.ts` — REST API for room creation/lookup
+- `artifacts/piano-conservatory/src/hooks/use-webrtc-room.ts` — WebRTC room hook (native RTCPeerConnection)
+- `artifacts/piano-conservatory/src/components/RoomCell.tsx` — Individual practice room component
+- `artifacts/piano-conservatory/src/pages/home.tsx` — Landing/join page
+- `artifacts/piano-conservatory/src/pages/room.tsx` — Main conservatory room view
+
+## WebRTC Signaling Flow
+
+1. User enters name + picks avatar on landing page → POSTs to `/api/rooms` to create a room OR enters a room code to join
+2. On joining, frontend connects to WebSocket at `/ws`
+3. WebSocket server broadcasts `peer-joined` / `peer-left` events
+4. When a new peer joins, existing peers send SDP offers; new peer answers
+5. ICE candidates exchanged through the WS server
+6. Video streams flow peer-to-peer via RTCPeerConnection
 
 ## TypeScript & Composite Projects
 
-Every package extends `tsconfig.base.json` which sets `composite: true`. The root `tsconfig.json` lists all packages as project references. This means:
-
-- **Always typecheck from the root** — run `pnpm run typecheck` (which runs `tsc --build --emitDeclarationOnly`). This builds the full dependency graph so that cross-package imports resolve correctly. Running `tsc` inside a single package will fail if its dependencies haven't been built yet.
-- **`emitDeclarationOnly`** — we only emit `.d.ts` files during typecheck; actual JS bundling is handled by esbuild/tsx/vite...etc, not `tsc`.
-- **Project references** — when package A depends on package B, A's `tsconfig.json` must list B in its `references` array. `tsc --build` uses this to determine build order and skip up-to-date packages.
+- `lib/*` packages are composite, emit declarations via `tsc --build`
+- `artifacts/*` are leaf packages checked with `tsc --noEmit`
+- Root `tsconfig.json` is a solution file for libs only
 
 ## Root Scripts
 
-- `pnpm run build` — runs `typecheck` first, then recursively runs `build` in all packages that define it
+- `pnpm run build` — runs typecheck then recursively runs build in all packages
 - `pnpm run typecheck` — runs `tsc --build --emitDeclarationOnly` using project references
 
 ## Packages
 
 ### `artifacts/api-server` (`@workspace/api-server`)
 
-Express 5 API server. Routes live in `src/routes/` and use `@workspace/api-zod` for request and response validation and `@workspace/db` for persistence.
+Express 5 API server with WebSocket signaling. Routes in `src/routes/`, signaling logic in `src/signaling.ts`.
 
-- Entry: `src/index.ts` — reads `PORT`, starts Express
-- App setup: `src/app.ts` — mounts CORS, JSON/urlencoded parsing, routes at `/api`
-- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`)
-- Depends on: `@workspace/db`, `@workspace/api-zod`
-- `pnpm --filter @workspace/api-server run dev` — run the dev server
-- `pnpm --filter @workspace/api-server run build` — production esbuild bundle (`dist/index.cjs`)
-- Build bundles an allowlist of deps (express, cors, pg, drizzle-orm, zod, etc.) and externalizes the rest
+- Entry: `src/index.ts` — creates HTTP server + WebSocketServer, starts listening
+- WebSocket path: `/ws`
+- API routes mounted at `/api`
+- Room REST API: `POST /api/rooms`, `GET /api/rooms/:roomId`
+
+### `artifacts/piano-conservatory` (`@workspace/piano-conservatory`)
+
+React + Vite frontend. Cartoon conservatory UI with WebRTC video.
+
+- `src/hooks/use-webrtc-room.ts` — core WebRTC + WebSocket logic
+- `src/components/RoomCell.tsx` — renders a single practice room
+- `src/pages/home.tsx` — join/create room landing page
+- `src/pages/room.tsx` — the main room with grid of participants
+- `public/images/` — AI-generated avatar images + piano + sleeping cat
 
 ### `lib/db` (`@workspace/db`)
 
-Database layer using Drizzle ORM with PostgreSQL. Exports a Drizzle client instance and schema models.
-
-- `src/index.ts` — creates a `Pool` + Drizzle instance, exports schema
-- `src/schema/index.ts` — barrel re-export of all models
-- `src/schema/<modelname>.ts` — table definitions with `drizzle-zod` insert schemas (no models definitions exist right now)
-- `drizzle.config.ts` — Drizzle Kit config (requires `DATABASE_URL`, automatically provided by Replit)
-- Exports: `.` (pool, db, schema), `./schema` (schema only)
-
-Production migrations are handled by Replit when publishing. In development, we just use `pnpm --filter @workspace/db run push`, and we fallback to `pnpm --filter @workspace/db run push-force`.
+Database layer using Drizzle ORM with PostgreSQL. No custom schema tables yet (rooms are in-memory in the signaling server).
 
 ### `lib/api-spec` (`@workspace/api-spec`)
 
-Owns the OpenAPI 3.1 spec (`openapi.yaml`) and the Orval config (`orval.config.ts`). Running codegen produces output into two sibling packages:
-
-1. `lib/api-client-react/src/generated/` — React Query hooks + fetch client
-2. `lib/api-zod/src/generated/` — Zod schemas
-
-Run codegen: `pnpm --filter @workspace/api-spec run codegen`
-
-### `lib/api-zod` (`@workspace/api-zod`)
-
-Generated Zod schemas from the OpenAPI spec (e.g. `HealthCheckResponse`). Used by `api-server` for response validation.
-
-### `lib/api-client-react` (`@workspace/api-client-react`)
-
-Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHealthCheck`, `healthCheck`).
-
-### `scripts` (`@workspace/scripts`)
-
-Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+OpenAPI 3.1 spec for room management API. Run codegen: `pnpm --filter @workspace/api-spec run codegen`

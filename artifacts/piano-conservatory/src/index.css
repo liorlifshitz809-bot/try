@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Quicksand:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --font-display: 'Fredoka', sans-serif;
+  --font-sans: 'Quicksand', sans-serif;
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-wood-light: hsl(var(--wood-light));
+  --color-wood-dark: hsl(var(--wood-dark));
+  --color-wall-warm: hsl(var(--wall-warm));
+  --color-wall-accent: hsl(var(--wall-accent));
+}
+
+:root {
+  /* Warm cream background */
+  --background: 42 33% 96%;
+  /* Dark brown/almost black for crisp text */
+  --foreground: 25 40% 15%;
+  
+  /* Vibrant teal/blue for primary actions */
+  --primary: 190 70% 50%;
+  --primary-foreground: 0 0% 100%;
+  
+  /* Sunny yellow for secondary elements */
+  --secondary: 45 90% 60%;
+  --secondary-foreground: 25 40% 15%;
+  
+  /* Muted warm grey */
+  --muted: 30 20% 90%;
+  --muted-foreground: 25 20% 45%;
+  
+  /* Deep burgundy/red accent */
+  --accent: 345 60% 45%;
+  --accent-foreground: 0 0% 100%;
+  
+  /* Destructive action red */
+  --destructive: 10 80% 55%;
+  --destructive-foreground: 0 0% 100%;
+  
+  /* Crisp dark borders for cartoon style */
+  --border: 25 40% 15%;
+  
+  /* Pure white cards with warmth */
+  --card: 40 20% 99%;
+  --card-foreground: 25 40% 15%;
+
+  /* Thematic specific colors */
+  --wood-light: 35 60% 65%;
+  --wood-dark: 25 60% 35%;
+  --wall-warm: 45 80% 85%;
+  --wall-accent: 10 50% 75%;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased font-sans overflow-x-hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    @apply font-bold tracking-wide;
+  }
+
+  /* Polyfill for simple-peer */
+  script.global-polyfill {
+    display: none;
+  }
+}
+
+@layer utilities {
+  .cartoon-border {
+    @apply border-4 border-foreground;
+  }
+  
+  .cartoon-shadow {
+    @apply shadow-[4px_4px_0px_0px_hsl(var(--foreground))];
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  
+  .cartoon-shadow-hover:hover {
+    @apply shadow-[6px_6px_0px_0px_hsl(var(--foreground))] -translate-y-0.5 -translate-x-0.5;
+  }
+
+  .cartoon-shadow-active:active {
+    @apply shadow-[2px_2px_0px_0px_hsl(var(--foreground))] translate-y-0.5 translate-x-0.5;
+  }
+
+  .bg-brick-pattern {
+    background-color: hsl(var(--wall-accent));
+    background-image: 
+      linear-gradient(335deg, rgba(255,255,255,0.1) 1px, transparent 1px),
+      linear-gradient(155deg, rgba(255,255,255,0.1) 1px, transparent 1px),
+      linear-gradient(335deg, rgba(255,255,255,0.1) 1px, transparent 1px),
+      linear-gradient(155deg, rgba(255,255,255,0.1) 1px, transparent 1px);
+    background-size: 58px 58px;
+    background-position: 0px 2px, 4px 35px, 29px 31px, 34px 6px;
+  }
+
+  .bg-wallpaper-pattern {
+    background-color: hsl(var(--wall-warm));
+    background-image: radial-gradient(hsl(var(--secondary)) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+}
+
+/* Animations */
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.animate-bounce-subtle {
+  animation: bounce-subtle 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(190, 210, 50, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(190, 210, 50, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(190, 210, 50, 0); }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s infinite;
+}

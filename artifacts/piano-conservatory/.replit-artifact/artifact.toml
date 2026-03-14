@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Piano Conservatory"
+version = "1.0.0"
+id = "artifacts/piano-conservatory"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+localPort = 25674
+name = "web"
+paths = ["/"]
+
+[services.development]
+run = "pnpm --filter @workspace/piano-conservatory run dev"
+
+[services.env]
+PORT = "25674"
+BASE_PATH = "/"
+
+[services.production]
+build = ["pnpm", "--filter", "@workspace/piano-conservatory", "run", "build"]
+publicDir = "artifacts/piano-conservatory/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
