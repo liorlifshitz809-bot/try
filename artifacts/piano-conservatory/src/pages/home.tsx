@@ -2,24 +2,30 @@ import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Music, Play, Plus, Users } from 'lucide-react';
+import { Music, Play, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useCreateRoom } from '@/hooks/use-rooms';
 import { useToast } from '@/hooks/use-toast';
+
+function slugify(text: string) {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 40);
+}
 
 export default function Home() {
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
-  const createRoomMut = useCreateRoom();
 
   const [displayName, setDisplayName] = useState('');
   const [avatarIndex, setAvatarIndex] = useState(0);
+  const [roomName, setRoomName] = useState('');
   const [roomCode, setRoomCode] = useState('');
 
   const saveProfile = () => {
-    if (!displayName.trim()) {
-      setDisplayName("Anonymous Pianist");
-    }
     localStorage.setItem('piano-conservatory-profile', JSON.stringify({
       displayName: displayName.trim() || "Anonymous Pianist",
       avatarIndex
@@ -32,17 +38,10 @@ export default function Home() {
       return;
     }
     saveProfile();
-    createRoomMut.mutate({ data: { displayName, avatarIndex } }, {
-      onSuccess: (data) => {
-        setLocation(`/room/${data.roomId}`);
-      },
-      onError: () => {
-        toast({ title: "Failed to create room", description: "Server might be unavailable.", variant: "destructive" });
-        // Fallback for demo if API fails
-        const fallbackId = Math.random().toString(36).substring(7);
-        setLocation(`/room/${fallbackId}`);
-      }
-    });
+    const roomId = roomName.trim()
+      ? slugify(roomName) || Math.random().toString(36).substring(2, 9)
+      : Math.random().toString(36).substring(2, 9);
+    setLocation(`/room/${roomId}`);
   };
 
   const handleJoinRoom = () => {
@@ -51,7 +50,7 @@ export default function Home() {
       return;
     }
     if (!roomCode.trim()) {
-      toast({ title: "Room Code required", description: "Please enter a room code.", variant: "destructive" });
+      toast({ title: "Room code required", description: "Please enter a room code or name.", variant: "destructive" });
       return;
     }
     saveProfile();
@@ -114,14 +113,31 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="pt-4 flex flex-col gap-4">
-              <Button 
-                onClick={handleCreateRoom} 
+            <div>
+              <label className="block font-bold mb-2 text-foreground">
+                Room Name <span className="text-muted-foreground font-normal text-sm">(optional)</span>
+              </label>
+              <Input
+                placeholder="e.g. Morning Practice, Beethoven Club..."
+                value={roomName}
+                onChange={e => setRoomName(e.target.value)}
+                maxLength={50}
+                onKeyDown={e => e.key === 'Enter' && handleCreateRoom()}
+              />
+              {roomName.trim() && (
+                <p className="mt-1 text-xs text-muted-foreground font-medium">
+                  Room link: <span className="text-primary font-bold">…/room/{slugify(roomName) || '…'}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="pt-2 flex flex-col gap-4">
+              <Button
+                onClick={handleCreateRoom}
                 className="w-full text-lg h-14"
-                disabled={createRoomMut.isPending}
               >
                 <Plus className="w-6 h-6 mr-2" />
-                {createRoomMut.isPending ? "Building Room..." : "Create New Room"}
+                Create New Room
               </Button>
               
               <div className="relative flex items-center py-2">
@@ -131,11 +147,12 @@ export default function Home() {
               </div>
 
               <div className="flex gap-2">
-                <Input 
-                  placeholder="Paste room code..." 
+                <Input
+                  placeholder="Room name or code..."
                   value={roomCode}
                   onChange={e => setRoomCode(e.target.value)}
                   className="bg-background"
+                  onKeyDown={e => e.key === 'Enter' && handleJoinRoom()}
                 />
                 <Button onClick={handleJoinRoom} variant="secondary" className="px-6 h-14 shrink-0">
                   <Play className="w-5 h-5" />
