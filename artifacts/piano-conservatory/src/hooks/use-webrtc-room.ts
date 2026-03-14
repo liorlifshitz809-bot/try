@@ -14,7 +14,12 @@ const ICE_SERVERS = [
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
 
-export function useWebRTCRoom(roomId: string, initialDisplayName: string, initialAvatarIndex: number) {
+export function useWebRTCRoom(
+  roomId: string,
+  initialDisplayName: string,
+  initialAvatarIndex: number,
+  providedStream: MediaStream | null,  // stream is provided externally (from a user-gesture getUserMedia)
+) {
   const myPeerId = useRef(nanoid()).current;
 
   const [localData] = useState<PeerData>({
@@ -29,14 +34,17 @@ export function useWebRTCRoom(roomId: string, initialDisplayName: string, initia
   const [cameraOffState, setCameraOffState] = useState(false);
   const [peers, setPeers] = useState<Record<string, PeerData>>({});
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingCandidates = useRef<Record<string, RTCIceCandidateInit[]>>({});
+
+  // Keep localStreamRef in sync with providedStream
+  useEffect(() => {
+    localStreamRef.current = providedStream;
+  }, [providedStream]);
 
   const sendWS = useCallback((data: object) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -82,37 +90,26 @@ export function useWebRTCRoom(roomId: string, initialDisplayName: string, initia
     return pc;
   }, [roomId, myPeerId, sendWS]);
 
-  const handleSignal = useCallback(async (fromPeerId: string, signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit }) => {
+  const handleSignal = useCallback(async (
+    fromPeerId: string,
+    signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit }
+  ) => {
     if (signal.type === 'offer') {
       let pc = pcsRef.current[fromPeerId];
-      if (!pc) {
-        pc = createPC(fromPeerId);
-      }
+      if (!pc) pc = createPC(fromPeerId);
       await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
-
       const pending = pendingCandidates.current[fromPeerId] ?? [];
-      for (const c of pending) {
-        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-      }
+      for (const c of pending) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
       pendingCandidates.current[fromPeerId] = [];
-
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      sendWS({
-        type: 'signal',
-        roomId,
-        targetPeerId: fromPeerId,
-        fromPeerId: myPeerId,
-        signal: { type: 'answer', sdp: pc.localDescription?.sdp },
-      });
+      sendWS({ type: 'signal', roomId, targetPeerId: fromPeerId, fromPeerId: myPeerId, signal: { type: 'answer', sdp: pc.localDescription?.sdp } });
     } else if (signal.type === 'answer') {
       const pc = pcsRef.current[fromPeerId];
       if (pc && pc.signalingState === 'have-local-offer') {
         await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
         const pending = pendingCandidates.current[fromPeerId] ?? [];
-        for (const c of pending) {
-          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-        }
+        for (const c of pending) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
         pendingCandidates.current[fromPeerId] = [];
       }
     } else if (signal.type === 'candidate' && signal.candidate) {
@@ -120,108 +117,84 @@ export function useWebRTCRoom(roomId: string, initialDisplayName: string, initia
       if (pc && pc.remoteDescription) {
         await pc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(() => {});
       } else {
-        if (!pendingCandidates.current[fromPeerId]) {
-          pendingCandidates.current[fromPeerId] = [];
-        }
+        if (!pendingCandidates.current[fromPeerId]) pendingCandidates.current[fromPeerId] = [];
         pendingCandidates.current[fromPeerId].push(signal.candidate);
       }
     }
   }, [createPC, myPeerId, roomId, sendWS]);
 
+  // Only connect to WS once we have a stream (meaning user tapped and granted permissions)
   useEffect(() => {
+    if (!providedStream) return;
+
     let mounted = true;
 
-    const init = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        if (!mounted) { stream.getTracks().forEach(t => t.stop()); return; }
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-      } catch {
-        setError('Could not access camera or microphone. Please allow permissions and refresh.');
-        return;
-      }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    wsRef.current = ws;
 
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (!mounted) return;
-        setIsConnected(true);
-        ws.send(JSON.stringify({
-          type: 'join',
-          roomId,
-          peerId: myPeerId,
-          displayName: localData.displayName,
-          avatarIndex: localData.avatarIndex,
-        }));
-      };
-
-      ws.onmessage = async (event) => {
-        if (!mounted) return;
-        let msg: Record<string, unknown>;
-        try { msg = JSON.parse(event.data); } catch { return; }
-
-        if (msg.roomId && msg.roomId !== roomId) return;
-
-        if (msg.type === 'room-joined') {
-          const existingPeers = (msg.peers as PeerData[]) ?? [];
-          const map: Record<string, PeerData> = {};
-          for (const p of existingPeers) {
-            map[p.peerId] = { ...p, isMuted: false, isCameraOff: false };
-            // Initiate offer to each existing peer
-            const pc = createPC(p.peerId);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            sendWS({
-              type: 'signal',
-              roomId,
-              targetPeerId: p.peerId,
-              fromPeerId: myPeerId,
-              signal: { type: 'offer', sdp: pc.localDescription?.sdp },
-            });
-          }
-          setPeers(map);
-        } else if (msg.type === 'peer-joined') {
-          const { peerId, displayName, avatarIndex } = msg as { peerId: string; displayName: string; avatarIndex: number };
-          if (peerId === myPeerId) return;
-          setPeers(prev => ({
-            ...prev,
-            [peerId]: { peerId, displayName, avatarIndex, isMuted: false, isCameraOff: false },
-          }));
-        } else if (msg.type === 'signal') {
-          const { fromPeerId, signal } = msg as { fromPeerId: string; signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit } };
-          if (fromPeerId === myPeerId) return;
-          await handleSignal(fromPeerId, signal);
-        } else if (msg.type === 'peer-left') {
-          const { peerId } = msg as { peerId: string };
-          pcsRef.current[peerId]?.close();
-          delete pcsRef.current[peerId];
-          setPeers(prev => { const n = { ...prev }; delete n[peerId]; return n; });
-          setStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
-        } else if (msg.type === 'state-update') {
-          const { peerId, isMuted, isCameraOff } = msg as { peerId: string; isMuted: boolean; isCameraOff: boolean };
-          if (peerId !== myPeerId) {
-            setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], isMuted, isCameraOff } } : prev);
-          }
-        }
-      };
-
-      ws.onerror = () => { if (mounted) setIsConnected(false); };
-      ws.onclose = () => { if (mounted) setIsConnected(false); };
+    ws.onopen = () => {
+      if (!mounted) return;
+      setIsConnected(true);
+      ws.send(JSON.stringify({
+        type: 'join',
+        roomId,
+        peerId: myPeerId,
+        displayName: localData.displayName,
+        avatarIndex: localData.avatarIndex,
+      }));
     };
 
-    init();
+    ws.onmessage = async (event) => {
+      if (!mounted) return;
+      let msg: Record<string, unknown>;
+      try { msg = JSON.parse(event.data); } catch { return; }
+
+      if (msg.roomId && msg.roomId !== roomId) return;
+
+      if (msg.type === 'room-joined') {
+        const existingPeers = (msg.peers as PeerData[]) ?? [];
+        const map: Record<string, PeerData> = {};
+        for (const p of existingPeers) {
+          map[p.peerId] = { ...p, isMuted: false, isCameraOff: false };
+          const pc = createPC(p.peerId);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          sendWS({ type: 'signal', roomId, targetPeerId: p.peerId, fromPeerId: myPeerId, signal: { type: 'offer', sdp: pc.localDescription?.sdp } });
+        }
+        setPeers(map);
+      } else if (msg.type === 'peer-joined') {
+        const { peerId, displayName, avatarIndex } = msg as { peerId: string; displayName: string; avatarIndex: number };
+        if (peerId === myPeerId) return;
+        setPeers(prev => ({ ...prev, [peerId]: { peerId, displayName, avatarIndex, isMuted: false, isCameraOff: false } }));
+      } else if (msg.type === 'signal') {
+        const { fromPeerId, signal } = msg as { fromPeerId: string; signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit } };
+        if (fromPeerId === myPeerId) return;
+        await handleSignal(fromPeerId, signal);
+      } else if (msg.type === 'peer-left') {
+        const { peerId } = msg as { peerId: string };
+        pcsRef.current[peerId]?.close();
+        delete pcsRef.current[peerId];
+        setPeers(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+        setStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
+      } else if (msg.type === 'state-update') {
+        const { peerId, isMuted, isCameraOff } = msg as { peerId: string; isMuted: boolean; isCameraOff: boolean };
+        if (peerId !== myPeerId) {
+          setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], isMuted, isCameraOff } } : prev);
+        }
+      }
+    };
+
+    ws.onerror = () => { if (mounted) setIsConnected(false); };
+    ws.onclose = () => { if (mounted) setIsConnected(false); };
 
     return () => {
       mounted = false;
-      wsRef.current?.close();
+      ws.close();
       Object.values(pcsRef.current).forEach(pc => pc.close());
       pcsRef.current = {};
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
     };
-  }, [roomId, myPeerId, localData.displayName, localData.avatarIndex, createPC, handleSignal, sendWS]);
+  }, [providedStream, roomId, myPeerId, localData.displayName, localData.avatarIndex, createPC, handleSignal, sendWS]);
 
   const toggleMute = useCallback(() => {
     setMutedState(prev => {
@@ -244,10 +217,9 @@ export function useWebRTCRoom(roomId: string, initialDisplayName: string, initia
   return {
     peers,
     streams,
-    localStream,
+    localStream: providedStream,
     localData: { ...localData, isMuted: mutedState, isCameraOff: cameraOffState },
     isConnected,
-    error,
     toggleMute,
     toggleCamera,
   };
