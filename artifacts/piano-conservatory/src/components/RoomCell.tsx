@@ -3,6 +3,72 @@ import { MicOff, VideoOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 
+function PianoSVG() {
+  return (
+    <svg viewBox="0 0 320 130" xmlns="http://www.w3.org/2000/svg" className="w-full" aria-label="Piano">
+      {/* Piano body */}
+      <rect x="10" y="50" width="300" height="72" rx="6" ry="6" fill="#1a1008" stroke="#000" strokeWidth="3"/>
+
+      {/* Lid open - propped up at an angle */}
+      <polygon points="10,50 310,50 250,8 70,8" fill="#2a1a0c" stroke="#000" strokeWidth="3"/>
+      {/* Lid prop stick */}
+      <line x1="230" y1="12" x2="240" y2="50" stroke="#6b4226" strokeWidth="3" strokeLinecap="round"/>
+
+      {/* Fallboard (the front panel above keys) */}
+      <rect x="10" y="50" width="300" height="14" rx="0" fill="#2a1a0c" stroke="#000" strokeWidth="2"/>
+
+      {/* Key bed */}
+      <rect x="15" y="86" width="290" height="32" rx="4" fill="#f5f0e8" stroke="#000" strokeWidth="2"/>
+
+      {/* White keys */}
+      {Array.from({ length: 14 }).map((_, i) => (
+        <rect
+          key={`wk-${i}`}
+          x={15 + i * (290 / 14)}
+          y={86}
+          width={290 / 14 - 2}
+          height={32}
+          rx="2"
+          fill="#fffef5"
+          stroke="#ccc"
+          strokeWidth="1"
+        />
+      ))}
+
+      {/* Black keys — positions match a real piano pattern */}
+      {[1, 2, 4, 5, 6, 8, 9, 11, 12, 13].map((pos) => (
+        <rect
+          key={`bk-${pos}`}
+          x={15 + pos * (290 / 14) - (290 / 14) * 0.3}
+          y={86}
+          width={(290 / 14) * 0.55}
+          height={20}
+          rx="2"
+          fill="#1a1008"
+          stroke="#000"
+          strokeWidth="1"
+        />
+      ))}
+
+      {/* Piano legs */}
+      <rect x="25" y="120" width="12" height="10" rx="2" fill="#1a1008"/>
+      <rect x="283" y="120" width="12" height="10" rx="2" fill="#1a1008"/>
+
+      {/* Music stand on top */}
+      <rect x="100" y="14" width="70" height="36" rx="3" fill="#3b2209" stroke="#000" strokeWidth="2"/>
+      <rect x="130" y="14" width="3" height="36" fill="#5a3310"/>
+      {/* Music lines on stand */}
+      <line x1="108" y1="22" x2="162" y2="22" stroke="#c8a97a" strokeWidth="1.5"/>
+      <line x1="108" y1="28" x2="162" y2="28" stroke="#c8a97a" strokeWidth="1.5"/>
+      <line x1="108" y1="34" x2="162" y2="34" stroke="#c8a97a" strokeWidth="1.5"/>
+      <line x1="108" y1="40" x2="162" y2="40" stroke="#c8a97a" strokeWidth="1.5"/>
+
+      {/* Shine on lid */}
+      <ellipse cx="190" cy="28" rx="40" ry="6" fill="white" opacity="0.08" transform="rotate(-10 190 28)"/>
+    </svg>
+  );
+}
+
 interface RoomCellProps {
   peerId: string;
   displayName?: string;
@@ -113,15 +179,10 @@ export function RoomCell({
       </div>
 
       {/* Piano illustration at bottom */}
-      <div className="relative w-[120%] h-24 sm:h-28 -mx-4 -mb-4 z-30 flex items-end">
-        <img 
-          src={`${import.meta.env.BASE_URL}images/piano.png`} 
-          alt="Piano"
-          className="w-full h-full object-cover object-top"
-        />
-        
+      <div className="relative w-[120%] -mx-4 -mb-2 z-30 flex flex-col items-center">
+        <PianoSVG />
         {/* Name tag on the piano */}
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-card/90 backdrop-blur px-3 py-1 rounded-lg border-2 border-foreground font-bold text-xs sm:text-sm whitespace-nowrap z-40 cartoon-shadow shadow-sm">
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-card/90 backdrop-blur px-3 py-1 rounded-lg border-2 border-foreground font-bold text-xs sm:text-sm whitespace-nowrap z-40 cartoon-shadow shadow-sm">
           {displayName}
           {isLocal && " (You)"}
         </div>
