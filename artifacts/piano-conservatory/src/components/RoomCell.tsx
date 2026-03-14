@@ -128,29 +128,32 @@ export function RoomCell({
         {/* Webcam Oval */}
         <div className="relative w-44 h-44 sm:w-52 sm:h-52 mb-4">
           <div className={cn(
-            "w-full h-full rounded-full border-4 border-foreground overflow-hidden bg-background cartoon-shadow-hover",
-            !isMuted && stream && "animate-pulse-ring" // Show pulse if they might be practicing
+            "relative w-full h-full rounded-full border-4 border-foreground overflow-hidden bg-background cartoon-shadow-hover",
+            !isMuted && stream && "animate-pulse-ring"
           )}>
-            {isCameraOff || !stream ? (
-              <div className="w-full h-full flex items-center justify-center bg-muted">
-                <img 
-                  src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`} 
-                  alt="Avatar placeholder"
-                  className="w-3/4 h-3/4 object-contain opacity-50 grayscale"
-                />
-              </div>
-            ) : (
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted={isLocal} // Always mute local video playback to avoid feedback
-                className={cn(
-                  "w-full h-full object-cover",
-                  isLocal && "scale-x-[-1]" // Mirror local video
-                )}
+            {/* Avatar placeholder — visible when camera is off or stream not ready */}
+            <div className={cn(
+              "absolute inset-0 flex items-center justify-center bg-muted transition-opacity duration-200",
+              isCameraOff || !stream ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
+            )}>
+              <img
+                src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
+                alt="Avatar placeholder"
+                className="w-3/4 h-3/4 object-contain opacity-50 grayscale"
               />
-            )}
+            </div>
+            {/* Video — always in DOM so srcObject stays alive */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted={isLocal}
+              className={cn(
+                "absolute inset-0 w-full h-full object-cover transition-opacity duration-200",
+                isLocal && "scale-x-[-1]",
+                isCameraOff || !stream ? "opacity-0 z-0 pointer-events-none" : "opacity-100 z-10"
+              )}
+            />
           </div>
 
           {/* Status Badges */}
