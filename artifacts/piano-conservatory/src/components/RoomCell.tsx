@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { VideoOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -72,6 +72,12 @@ export function RoomCell({
 }: RoomCellProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Track whether the lid has ever been opened — break text only shows after first practice
+  const [hasEverOpened, setHasEverOpened] = useState(false);
+  useEffect(() => {
+    if (isLidOpen) setHasEverOpened(true);
+  }, [isLidOpen]);
+
   // Always keep the video element in the DOM — toggling srcObject only once when stream arrives.
   // Conditional rendering caused the srcObject to be lost on remount (stream ref doesn't change
   // so the effect never re-runs on the new element), which caused the blank white screen bug.
@@ -81,7 +87,12 @@ export function RoomCell({
     }
   }, [stream]);
 
-  const cameraOff = isCameraOff || !stream;
+  // Camera is considered "off" if explicitly muted, or if the stream has no live+enabled video tracks.
+  // This correctly handles audio-only joins where isCameraOff is never set but there's no video.
+  const hasVideoTracks = stream
+    ? stream.getVideoTracks().some(t => t.enabled && t.readyState === 'live')
+    : false;
+  const cameraOff = isCameraOff || !hasVideoTracks;
 
   if (isEmpty) {
     return (
@@ -179,20 +190,6 @@ export function RoomCell({
           />
         </div>
 
-        {/* Small avatar sitting at piano — visible only when camera is on */}
-        {!cameraOff && (
-          <div className={cn("absolute bottom-2 left-1/2 -translate-x-1/2 z-20 drop-shadow-md", customAvatarUrl ? "w-16 h-16 sm:w-20 sm:h-20" : "w-14 h-14 sm:w-18 sm:h-18")}>
-            <img
-              src={customAvatarUrl || `${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
-              alt={displayName}
-              className={cn(
-                "w-full h-full",
-                customAvatarUrl ? "object-cover rounded-full border-2 border-white/80" : "object-contain",
-                isLidOpen && "animate-bounce-subtle"
-              )}
-            />
-          </div>
-        )}
       </div>
 
       {/* Piano at bottom */}
@@ -205,8 +202,8 @@ export function RoomCell({
           <PianoSVG lidOpen={isLidOpen} />
         </motion.div>
 
-        {/* Break message when lid closed */}
-        {!isLidOpen && displayName && (
+        {/* Break message — only appears after the lid has been opened at least once */}
+        {!isLidOpen && hasEverOpened && displayName && (
           <div
             className="absolute -top-5 left-1/2 -translate-x-1/2 bg-amber-100 border-2 border-amber-600 text-amber-900 text-xs font-bold px-3 py-1 rounded-full z-40 whitespace-nowrap shadow"
             dir="rtl"
