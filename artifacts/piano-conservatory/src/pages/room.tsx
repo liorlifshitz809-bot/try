@@ -70,30 +70,89 @@ export default function RoomPage() {
   const handleStartCamera = useCallback(async () => {
     setRequestingPermission(true);
     setPermissionError(null);
-    try {
-      // Try video + audio first
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setLocalStream(stream);
-    } catch (videoErr) {
-      // Fallback: try audio-only (some devices/browsers block video but not audio)
+
+    // Check for mediaDevices API support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setPermissionError('Your browser does not support camera access. Try Chrome or Safari on a modern device.');
+      setRequestingPermission(false);
+      return;
+    }
+
+    // Try progressively relaxed constraint sets so mobile Chrome has the best chance
+    const videoConstraintSets = [
+      // 1. Mobile-friendly: front-facing camera, capped resolution
+      { video: { facingMode: { ideal: 'user' }, width: { ideal: 640, max: 1280 }, height: { ideal: 480, max: 720 } }, audio: true },
+      // 2. Simple true/true — many desktop browsers prefer this
+      { video: true, audio: true },
+      // 3. Video only (in case the mic is the problem)
+      { video: { facingMode: { ideal: 'user' } }, audio: false },
+    ] as MediaStreamConstraints[];
+
+    let stream: MediaStream | null = null;
+    let lastErr: unknown = null;
+
+    for (const constraints of videoConstraintSets) {
       try {
-        const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        setLocalStream(audioOnly);
-        toast({ title: 'Camera not available', description: 'Joined with audio only — camera could not be accessed.' });
-      } catch {
-        const msg = videoErr instanceof Error ? videoErr.message : String(videoErr);
-        if (msg.includes('Permission denied') || msg.includes('NotAllowed') || msg.includes('dismissed')) {
-          setPermissionError('Camera and microphone access was denied. Tap the camera icon in your browser address bar to allow it, then try again.');
-        } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
-          setPermissionError('No camera or microphone found on this device.');
-        } else {
-          setPermissionError('Could not start camera. Make sure no other app is using it, then try again.');
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (!constraints.audio) {
+          toast({ title: 'No microphone', description: 'Joined with video only — microphone could not be accessed.' });
         }
+        break; // success
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        // Don't keep retrying on permission errors — the user said no
+        if (msg.includes('NotAllowed') || msg.includes('Permission denied') || msg.includes('dismissed')) break;
+      }
+    }
+
+    if (stream) {
+      setLocalStream(stream);
+      setRequestingPermission(false);
+      return;
+    }
+
+    // All video attempts failed — try audio-only as a last resort
+    try {
+      const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      setLocalStream(audioOnly);
+      toast({ title: 'Camera not available', description: 'Joined with audio only — camera could not be accessed.' });
+    } catch {
+      const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+      if (msg.includes('NotAllowed') || msg.includes('Permission denied') || msg.includes('dismissed')) {
+        setPermissionError('Camera and microphone access was denied. Tap the camera icon in your browser address bar to allow it, then try again.');
+      } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound') || msg.includes('Devices not found')) {
+        setPermissionError('No camera or microphone found on this device.');
+      } else {
+        setPermissionError(`Could not start camera (${msg}). Make sure no other app is using it, then try again.`);
       }
     } finally {
       setRequestingPermission(false);
     }
   }, [toast]);
+
+  const handleStartAudioOnly = useCallback(async () => {
+    setRequestingPermission(true);
+    setPermissionError(null);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setPermissionError('Your browser does not support microphone access.');
+      setRequestingPermission(false);
+      return;
+    }
+    try {
+      const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      setLocalStream(audioOnly);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('NotAllowed') || msg.includes('Permission denied') || msg.includes('dismissed')) {
+        setPermissionError('Microphone access was denied. Tap the microphone icon in your browser address bar to allow it.');
+      } else {
+        setPermissionError('Could not access microphone. Make sure it is not in use by another app.');
+      }
+    } finally {
+      setRequestingPermission(false);
+    }
+  }, []);
 
   const {
     peers,
@@ -201,7 +260,7 @@ export default function RoomPage() {
             Joining as: <span className="font-bold text-foreground">{profile.displayName}</span>
           </p>
           <p className="text-muted-foreground text-sm mb-6">
-            Tap below to allow your camera and microphone, then join.
+            Tap below to allow camera &amp; microphone, or join with audio only.
           </p>
 
           {permissionError && (
@@ -222,7 +281,17 @@ export default function RoomPage() {
             className="w-full h-14 text-lg mb-3"
           >
             <Camera className="w-5 h-5 mr-2" />
-            {requestingPermission ? 'Asking for permission…' : permissionError ? 'Try Again' : 'Allow Camera & Mic'}
+            {requestingPermission ? 'Asking for permission…' : permissionError ? 'Try Again with Camera' : 'Allow Camera & Mic'}
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={handleStartAudioOnly}
+            disabled={requestingPermission}
+            className="w-full mb-3"
+          >
+            <Mic className="w-4 h-4 mr-2" />
+            Join with Mic Only (no camera)
           </Button>
 
           <Button variant="ghost" className="w-full" onClick={() => setLocation('/')}>
