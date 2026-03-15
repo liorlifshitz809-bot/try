@@ -395,7 +395,7 @@ export default function RoomPage() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-card border-4 border-foreground rounded-2xl cartoon-shadow p-3 w-64 sm:w-72"
+                  className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-card border-4 border-foreground rounded-2xl cartoon-shadow p-3 w-64 sm:w-72 z-[60]"
                 >
                   <div className="flex flex-wrap gap-2 justify-center mb-3">
                     {REACTION_EMOJIS.map((emoji) => (
