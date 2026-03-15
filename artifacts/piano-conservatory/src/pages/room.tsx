@@ -21,6 +21,8 @@ const REACTION_SENTENCES = [
   '״קשה באימונים קל בקרב״',
   '״הגיע הזמן לקצב״',
   '״תכף אחזור״',
+  '״הלכתי לישון״',
+
 ];
 
 // Read profile synchronously so useWebRTCRoom gets the correct initial values right away
