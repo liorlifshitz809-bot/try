@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, Clock, Calendar, ArrowLeft, Trophy, Music } from "lucide-react";
+import { Trash2, Plus, Clock, Calendar, ArrowLeft, Trophy, Music, Pencil, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Session {
@@ -56,7 +56,7 @@ const today = new Date().toISOString().split("T")[0];
 
 export default function DashboardPage() {
   const [, setLocation] = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile } = useAuth();
   const { toast } = useToast();
 
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -65,6 +65,37 @@ export default function DashboardPage() {
   const [selectedDate, setSelectedDate] = useState(today);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"today" | "history" | "add">("today");
+
+  // Profile editing
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [pendingAvatar, setPendingAvatar] = useState(user?.avatarIndex ?? 0);
+  const [pendingName, setPendingName] = useState(user?.displayName ?? "");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Keep pending values in sync when user changes (e.g. after initial load)
+  useEffect(() => {
+    if (user && !editingProfile) {
+      setPendingAvatar(user.avatarIndex);
+      setPendingName(user.displayName);
+    }
+  }, [user, editingProfile]);
+
+  const handleSaveProfile = async () => {
+    if (!pendingName.trim()) {
+      toast({ title: "Display name cannot be empty", variant: "destructive" });
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      await updateProfile({ displayName: pendingName.trim(), avatarIndex: pendingAvatar });
+      toast({ title: "Profile updated!" });
+      setEditingProfile(false);
+    } catch (err: any) {
+      toast({ title: "Failed to save", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   // Add session form
   const [addDuration, setAddDuration] = useState("");
@@ -165,11 +196,25 @@ export default function DashboardPage() {
               </Button>
             </Link>
             <div className="flex items-center gap-2">
-              <img
-                src={`${import.meta.env.BASE_URL}images/avatar-${user.avatarIndex}.png`}
-                alt={user.displayName}
-                className="w-9 h-9 object-contain"
-              />
+              {/* Avatar with edit button overlay */}
+              <div className="relative group">
+                <img
+                  src={`${import.meta.env.BASE_URL}images/avatar-${editingProfile ? pendingAvatar : user.avatarIndex}.png`}
+                  alt={user.displayName}
+                  className="w-11 h-11 object-contain"
+                />
+                <button
+                  onClick={() => {
+                    setPendingAvatar(user.avatarIndex);
+                    setPendingName(user.displayName);
+                    setEditingProfile(v => !v);
+                  }}
+                  className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary border-2 border-white rounded-full flex items-center justify-center shadow-sm hover:bg-primary/80 transition-colors"
+                  title="Edit profile"
+                >
+                  <Pencil className="w-2.5 h-2.5 text-white" />
+                </button>
+              </div>
               <div>
                 <div className="font-display font-bold leading-tight">{user.displayName}</div>
                 <div className="text-xs text-muted-foreground">{user.email}</div>
@@ -180,6 +225,85 @@ export default function DashboardPage() {
             Sign Out
           </Button>
         </div>
+
+        {/* Inline profile-edit panel */}
+        <AnimatePresence>
+          {editingProfile && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden border-t-4 border-foreground bg-card"
+            >
+              <div className="max-w-4xl mx-auto px-4 py-4 space-y-3">
+                {/* Display name input */}
+                <div>
+                  <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1 block">
+                    Display Name
+                  </Label>
+                  <Input
+                    value={pendingName}
+                    onChange={e => setPendingName(e.target.value)}
+                    maxLength={30}
+                    className="border-2 border-foreground h-9 text-sm"
+                  />
+                </div>
+
+                {/* Avatar grid */}
+                <div>
+                  <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">
+                    Choose Avatar
+                  </Label>
+                  <div className="grid grid-cols-8 gap-1.5">
+                    {Array.from({ length: 16 }).map((_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setPendingAvatar(i)}
+                        className={cn(
+                          "rounded-xl border-2 p-1 transition-all aspect-square flex items-center justify-center",
+                          pendingAvatar === i
+                            ? "border-primary bg-primary/10 scale-110 shadow-sm"
+                            : "border-transparent hover:border-muted-foreground/40 hover:bg-muted/50"
+                        )}
+                      >
+                        <img
+                          src={`${import.meta.env.BASE_URL}images/avatar-${i}.png`}
+                          alt={`Avatar ${i}`}
+                          className="w-8 h-8 object-contain"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleSaveProfile}
+                    disabled={savingProfile}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    {savingProfile ? "Saving…" : "Save Changes"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 border-2"
+                    onClick={() => setEditingProfile(false)}
+                    disabled={savingProfile}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       <main className="max-w-4xl mx-auto px-4 pt-6 space-y-6">

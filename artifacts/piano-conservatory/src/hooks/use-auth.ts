@@ -17,6 +17,7 @@ interface AuthActions {
   signup: (email: string, password: string, displayName: string, avatarIndex: number) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  updateProfile: (patch: { displayName?: string; avatarIndex?: number }) => Promise<void>;
 }
 
 export type AuthContext = AuthState & AuthActions;
@@ -28,6 +29,7 @@ export const AuthCtx = createContext<AuthContext>({
   signup: async () => {},
   logout: async () => {},
   refresh: async () => {},
+  updateProfile: async () => {},
 });
 
 export function useAuth() {
@@ -89,5 +91,22 @@ export function useAuthState(): AuthContext {
     setState({ user: null, loading: false });
   }, []);
 
-  return { ...state, login, signup, logout, refresh };
+  const updateProfile = useCallback(async (patch: { displayName?: string; avatarIndex?: number }) => {
+    const res = await fetch("/api/auth/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to update profile");
+    setState(prev => ({ ...prev, user: data.user }));
+    // Keep localStorage in sync so room.tsx reads the latest avatar/name
+    localStorage.setItem("piano-conservatory-profile", JSON.stringify({
+      displayName: data.user.displayName,
+      avatarIndex: data.user.avatarIndex,
+    }));
+  }, []);
+
+  return { ...state, login, signup, logout, refresh, updateProfile };
 }

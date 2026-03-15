@@ -139,6 +139,49 @@ router.post("/auth/forgot-password", async (req, res) => {
   }
 });
 
+// PUT /api/auth/profile — update display name and/or avatar
+router.put("/auth/profile", requireAuth, async (req, res) => {
+  const { displayName, avatarIndex } = req.body as {
+    displayName?: string;
+    avatarIndex?: number;
+  };
+  const userId = req.user!.id;
+
+  if (displayName !== undefined && !displayName.trim()) {
+    res.status(400).json({ error: "Display name cannot be empty" });
+    return;
+  }
+  if (avatarIndex !== undefined && (avatarIndex < 0 || avatarIndex > 15)) {
+    res.status(400).json({ error: "Avatar index must be 0–15" });
+    return;
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE users
+       SET display_name = COALESCE($1, display_name),
+           avatar_index = COALESCE($2, avatar_index)
+       WHERE id = $3
+       RETURNING id, email, display_name, avatar_index`,
+      [displayName?.trim() ?? null, avatarIndex ?? null, userId]
+    );
+    const row = result.rows[0];
+    const updatedUser: AuthUser = {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      avatarIndex: row.avatar_index,
+    };
+    // Issue a fresh JWT with the new data
+    const token = signToken(updatedUser);
+    setAuthCookie(res, token);
+    res.json({ user: updatedUser });
+  } catch (err) {
+    console.error("Update profile error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /api/auth/reset-password — use token to set new password
 router.post("/auth/reset-password", async (req, res) => {
   const { token, password } = req.body as { token?: string; password?: string };
