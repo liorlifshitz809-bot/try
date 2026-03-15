@@ -90,26 +90,28 @@ export default function Home() {
 
             <div>
               <label className="block font-bold mb-2 text-foreground">Choose an Avatar</label>
-              <div className="grid grid-cols-4 gap-2 sm:gap-3">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setAvatarIndex(i)}
-                    className={`relative rounded-xl border-4 transition-all overflow-hidden bg-background aspect-square flex items-center justify-center p-2
-                      ${avatarIndex === i 
-                        ? 'border-primary cartoon-shadow scale-105' 
-                        : 'border-transparent hover:border-muted-foreground/30 hover:scale-105'}`}
-                  >
-                    <img 
-                      src={`${import.meta.env.BASE_URL}images/avatar-${i}.png`} 
-                      alt={`Avatar ${i}`} 
-                      className="w-full h-full object-contain drop-shadow-sm"
-                    />
-                    {avatarIndex === i && (
-                      <div className="absolute inset-0 bg-primary/10 rounded-lg pointer-events-none" />
-                    )}
-                  </button>
-                ))}
+              <div className="max-h-52 overflow-y-auto rounded-xl pr-1 -mr-1">
+                <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                  {Array.from({ length: 16 }).map((_, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setAvatarIndex(i)}
+                      className={`relative rounded-xl border-4 transition-all overflow-hidden bg-background aspect-square flex items-center justify-center p-2
+                        ${avatarIndex === i 
+                          ? 'border-primary cartoon-shadow scale-105' 
+                          : 'border-transparent hover:border-muted-foreground/30 hover:scale-105'}`}
+                    >
+                      <img 
+                        src={`${import.meta.env.BASE_URL}images/avatar-${i}.png`} 
+                        alt={`Avatar ${i}`} 
+                        className="w-full h-full object-contain drop-shadow-sm"
+                      />
+                      {avatarIndex === i && (
+                        <div className="absolute inset-0 bg-primary/10 rounded-lg pointer-events-none" />
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
