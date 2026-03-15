@@ -28,30 +28,10 @@ function PianoSVG({ lidOpen = true }: { lidOpen?: boolean }) {
       )}
       <rect x="15" y="86" width="290" height="32" rx="4" fill="#f5f0e8" stroke="#000" strokeWidth="2"/>
       {Array.from({ length: 14 }).map((_, i) => (
-        <rect
-          key={`wk-${i}`}
-          x={15 + i * (290 / 14)}
-          y={86}
-          width={290 / 14 - 2}
-          height={32}
-          rx="2"
-          fill="#fffef5"
-          stroke="#ccc"
-          strokeWidth="1"
-        />
+        <rect key={`wk-${i}`} x={15 + i * (290 / 14)} y={86} width={290 / 14 - 2} height={32} rx="2" fill="#fffef5" stroke="#ccc" strokeWidth="1"/>
       ))}
       {[1, 2, 4, 5, 6, 8, 9, 11, 12, 13].map((pos) => (
-        <rect
-          key={`bk-${pos}`}
-          x={15 + pos * (290 / 14) - (290 / 14) * 0.3}
-          y={86}
-          width={(290 / 14) * 0.55}
-          height={20}
-          rx="2"
-          fill="#1a1008"
-          stroke="#000"
-          strokeWidth="1"
-        />
+        <rect key={`bk-${pos}`} x={15 + pos * (290 / 14) - (290 / 14) * 0.3} y={86} width={(290 / 14) * 0.55} height={20} rx="2" fill="#1a1008" stroke="#000" strokeWidth="1"/>
       ))}
       <rect x="25" y="120" width="12" height="10" rx="2" fill="#1a1008"/>
       <rect x="283" y="120" width="12" height="10" rx="2" fill="#1a1008"/>
@@ -90,11 +70,16 @@ export function RoomCell({
 }: RoomCellProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  // Always keep the video element in the DOM — toggling srcObject only once when stream arrives.
+  // Conditional rendering caused the srcObject to be lost on remount (stream ref doesn't change
+  // so the effect never re-runs on the new element), which caused the blank white screen bug.
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
     }
   }, [stream]);
+
+  const cameraOff = isCameraOff || !stream;
 
   if (isEmpty) {
     return (
@@ -114,22 +99,37 @@ export function RoomCell({
     );
   }
 
-  const cameraOff = isCameraOff || !stream;
-
   return (
     <div className={cn(
-      "relative flex flex-col items-center justify-between w-full h-full min-h-[360px] sm:min-h-[420px] border-8 rounded-2xl overflow-hidden cartoon-shadow p-2 pt-6 transition-all duration-300",
+      "relative flex flex-col items-center justify-between w-full h-full min-h-[360px] sm:min-h-[420px] border-8 rounded-2xl overflow-hidden cartoon-shadow transition-all duration-300",
       isLocal ? "border-primary bg-primary/10" : "border-wood-dark bg-wood-light",
       isLidOpen && "ring-4 ring-green-400 ring-offset-2"
     )}>
+      {/* Wall Texture */}
       <div className="absolute inset-0 bg-wallpaper-pattern opacity-60 z-0"></div>
 
+      {/* Lid status badge */}
       {isLidOpen && (
         <div className="absolute top-2 right-2 z-30 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-full border-2 border-green-700 shadow">
           🎹 Practicing
         </div>
       )}
 
+      {/* Status badges (top-left) */}
+      <div className="absolute top-2 left-2 z-30 flex flex-col gap-1">
+        {isMuted && (
+          <div className="bg-card p-1.5 rounded-full border-2 border-foreground shadow-sm flex items-center justify-center" title="Muted">
+            <span className="text-sm">🤫</span>
+          </div>
+        )}
+        {cameraOff && (
+          <div className="bg-card p-1.5 rounded-full border-2 border-foreground shadow-sm flex items-center justify-center text-muted-foreground" title="Camera Off">
+            <VideoOff size={14} />
+          </div>
+        )}
+      </div>
+
+      {/* Reaction bubble */}
       <AnimatePresence mode="wait">
         {reaction && (
           <motion.div
@@ -139,7 +139,7 @@ export function RoomCell({
             exit={{ opacity: 0, y: -20 }}
             transition={{ type: 'spring', stiffness: 300, damping: 20 }}
             className={cn(
-              "absolute top-10 left-1/2 -translate-x-1/2 z-40 bg-white border-3 border-foreground rounded-2xl shadow-lg px-3 py-2 max-w-[85%]",
+              "absolute top-10 left-1/2 -translate-x-1/2 z-40 bg-white border-2 border-foreground rounded-2xl shadow-lg px-3 py-2 max-w-[85%]",
               isEmojiOnly(reaction) ? "text-3xl" : "text-sm font-bold"
             )}
             dir="rtl"
@@ -150,55 +150,47 @@ export function RoomCell({
         )}
       </AnimatePresence>
 
-      <div className="relative z-10 flex flex-col items-center flex-1 w-full mt-2">
-        {cameraOff ? (
-          <div className="flex items-center justify-center flex-1 w-full px-4 py-2">
+      {/* Video area — fills the full space above the piano. Always in DOM to preserve srcObject. */}
+      <div className="relative z-10 flex-1 w-full overflow-hidden">
+        {/* Live video — always rendered, hidden via opacity when camera off */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isLocal}
+          className={cn(
+            "absolute inset-0 w-full h-full object-cover transition-opacity duration-300",
+            isLocal && "scale-x-[-1]",
+            cameraOff ? "opacity-0" : "opacity-100"
+          )}
+        />
+
+        {/* Avatar shown when camera is off — overlaid on the video area */}
+        <div className={cn(
+          "absolute inset-0 flex items-center justify-center transition-opacity duration-300",
+          cameraOff ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}>
+          <img
+            src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
+            alt={displayName}
+            className="w-3/4 h-3/4 object-contain drop-shadow-lg"
+          />
+        </div>
+
+        {/* Small avatar sitting at piano — visible only when camera is on */}
+        {!cameraOff && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 w-14 h-14 sm:w-18 sm:h-18 drop-shadow-md">
             <img
               src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
               alt={displayName}
-              className="w-full h-full max-h-[70%] object-contain drop-shadow-lg"
+              className={cn("w-full h-full object-contain", isLidOpen && "animate-bounce-subtle")}
             />
           </div>
-        ) : (
-          <>
-            <div className="relative w-44 h-44 sm:w-52 sm:h-52 mb-4">
-              <div className={cn(
-                "relative w-full h-full rounded-full border-4 border-foreground overflow-hidden bg-background cartoon-shadow-hover",
-                !isMuted && stream && "animate-pulse-ring"
-              )}>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted={isLocal}
-                  className={cn(
-                    "absolute inset-0 w-full h-full object-cover",
-                    isLocal && "scale-x-[-1]"
-                  )}
-                />
-              </div>
-
-              <div className="absolute -bottom-2 -right-2 flex gap-1">
-                {isMuted && (
-                  <div className="bg-card p-1.5 rounded-full border-2 border-foreground shadow-sm z-20 flex items-center justify-center" title="Muted">
-                    <span className="text-sm">🤫</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="absolute bottom-2 z-20 w-16 h-16 sm:w-20 sm:h-20 drop-shadow-md">
-              <img
-                src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
-                alt={displayName}
-                className={cn("w-full h-full object-contain", isLidOpen && "animate-bounce-subtle")}
-              />
-            </div>
-          </>
         )}
       </div>
 
-      <div className="relative w-[120%] -mx-4 -mb-2 z-30 flex flex-col items-center">
+      {/* Piano at bottom */}
+      <div className="relative w-[115%] z-30 flex flex-col items-center -mb-1">
         <motion.div
           className="w-full"
           animate={{ scaleY: isLidOpen ? 1 : 0.97 }}
@@ -207,35 +199,22 @@ export function RoomCell({
           <PianoSVG lidOpen={isLidOpen} />
         </motion.div>
 
+        {/* Break message when lid closed */}
         {!isLidOpen && displayName && (
           <div
-            className="absolute -top-4 left-1/2 -translate-x-1/2 bg-amber-100 border-2 border-amber-600 text-amber-900 text-xs font-bold px-3 py-1 rounded-full z-40 whitespace-nowrap shadow"
+            className="absolute -top-5 left-1/2 -translate-x-1/2 bg-amber-100 border-2 border-amber-600 text-amber-900 text-xs font-bold px-3 py-1 rounded-full z-40 whitespace-nowrap shadow"
             dir="rtl"
           >
             יצאתי להפסקה אשוב בקרוב
           </div>
         )}
 
+        {/* Name tag */}
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-card/90 backdrop-blur px-3 py-1 rounded-lg border-2 border-foreground font-bold text-xs sm:text-sm whitespace-nowrap z-40 cartoon-shadow shadow-sm">
           {displayName}
           {isLocal && ' (You)'}
         </div>
       </div>
-
-      {cameraOff && (
-        <div className="absolute bottom-[90px] right-2 z-30">
-          <div className="bg-card p-1.5 rounded-full border-2 border-foreground shadow-sm flex items-center justify-center text-muted-foreground" title="Camera Off">
-            <VideoOff size={16} />
-          </div>
-        </div>
-      )}
-      {isMuted && cameraOff && (
-        <div className="absolute bottom-[90px] right-12 z-30">
-          <div className="bg-card p-1.5 rounded-full border-2 border-foreground shadow-sm flex items-center justify-center" title="Muted">
-            <span className="text-sm">🤫</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

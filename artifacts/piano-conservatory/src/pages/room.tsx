@@ -333,8 +333,9 @@ export default function RoomPage() {
       </main>
 
       {/* Bottom Toolbar */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-        <div className="bg-card border-4 border-foreground p-3 rounded-3xl cartoon-shadow flex items-center gap-2 sm:gap-3 px-4 sm:px-5">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100vw-1.5rem)] sm:w-auto max-w-[calc(100vw-1.5rem)]">
+        <div className="overflow-x-auto rounded-3xl" style={{ scrollbarWidth: 'none' }}>
+        <div className="bg-card border-4 border-foreground p-2.5 sm:p-3 rounded-3xl cartoon-shadow flex items-center gap-2 sm:gap-3 px-3 sm:px-5 w-max mx-auto">
 
           {/* Mute */}
           <Button
@@ -456,6 +457,7 @@ export default function RoomPage() {
             <PhoneOff className="w-5 h-5 sm:mr-2" />
             <span className="hidden sm:inline-block">Leave</span>
           </Button>
+        </div>
         </div>
       </div>
     </div>
