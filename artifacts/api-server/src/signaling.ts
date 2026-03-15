@@ -6,6 +6,7 @@ interface PeerInfo {
   roomId: string;
   displayName: string;
   avatarIndex: number;
+  customAvatarUrl?: string;
 }
 
 const rooms = new Map<string, Map<string, PeerInfo>>();
@@ -36,22 +37,22 @@ export function setupSignaling(wss: WebSocketServer) {
       const type = msg.type as string;
 
       if (type === "join") {
-        const { roomId, peerId, displayName, avatarIndex } = msg as {
-          roomId: string; peerId: string; displayName: string; avatarIndex: number;
+        const { roomId, peerId, displayName, avatarIndex, customAvatarUrl } = msg as {
+          roomId: string; peerId: string; displayName: string; avatarIndex: number; customAvatarUrl?: string;
         };
 
         if (!rooms.has(roomId)) rooms.set(roomId, new Map());
         const room = rooms.get(roomId)!;
 
-        currentPeer = { ws, peerId, roomId, displayName, avatarIndex };
+        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, customAvatarUrl };
         room.set(peerId, currentPeer);
 
         const existingPeers = Array.from(room.values())
           .filter((p) => p.peerId !== peerId)
-          .map((p) => ({ peerId: p.peerId, displayName: p.displayName, avatarIndex: p.avatarIndex }));
+          .map((p) => ({ peerId: p.peerId, displayName: p.displayName, avatarIndex: p.avatarIndex, customAvatarUrl: p.customAvatarUrl }));
 
         ws.send(JSON.stringify({ type: "room-joined", roomId, peers: existingPeers }));
-        broadcast(roomId, { type: "peer-joined", peerId, displayName, avatarIndex }, peerId);
+        broadcast(roomId, { type: "peer-joined", peerId, displayName, avatarIndex, customAvatarUrl }, peerId);
 
         console.log(`Peer ${peerId} (${displayName}) joined room ${roomId}. Room size: ${room.size}`);
 

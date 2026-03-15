@@ -5,6 +5,7 @@ export interface AuthUser {
   email: string;
   displayName: string;
   avatarIndex: number;
+  customAvatarUrl?: string;
 }
 
 interface AuthState {
@@ -17,7 +18,7 @@ interface AuthActions {
   signup: (email: string, password: string, displayName: string, avatarIndex: number) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
-  updateProfile: (patch: { displayName?: string; avatarIndex?: number }) => Promise<void>;
+  updateProfile: (patch: { displayName?: string; avatarIndex?: number; customAvatarUrl?: string | null }) => Promise<void>;
 }
 
 export type AuthContext = AuthState & AuthActions;
@@ -34,6 +35,14 @@ export const AuthCtx = createContext<AuthContext>({
 
 export function useAuth() {
   return useContext(AuthCtx);
+}
+
+function syncProfileToStorage(user: AuthUser) {
+  localStorage.setItem("piano-conservatory-profile", JSON.stringify({
+    displayName: user.displayName,
+    avatarIndex: user.avatarIndex,
+    customAvatarUrl: user.customAvatarUrl,
+  }));
 }
 
 export function useAuthState(): AuthContext {
@@ -67,6 +76,7 @@ export function useAuthState(): AuthContext {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Login failed");
     setState({ user: data.user, loading: false });
+    syncProfileToStorage(data.user);
   }, []);
 
   const signup = useCallback(async (
@@ -84,6 +94,7 @@ export function useAuthState(): AuthContext {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Signup failed");
     setState({ user: data.user, loading: false });
+    syncProfileToStorage(data.user);
   }, []);
 
   const logout = useCallback(async () => {
@@ -91,7 +102,7 @@ export function useAuthState(): AuthContext {
     setState({ user: null, loading: false });
   }, []);
 
-  const updateProfile = useCallback(async (patch: { displayName?: string; avatarIndex?: number }) => {
+  const updateProfile = useCallback(async (patch: { displayName?: string; avatarIndex?: number; customAvatarUrl?: string | null }) => {
     const res = await fetch("/api/auth/profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -101,11 +112,7 @@ export function useAuthState(): AuthContext {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Failed to update profile");
     setState(prev => ({ ...prev, user: data.user }));
-    // Keep localStorage in sync so room.tsx reads the latest avatar/name
-    localStorage.setItem("piano-conservatory-profile", JSON.stringify({
-      displayName: data.user.displayName,
-      avatarIndex: data.user.avatarIndex,
-    }));
+    syncProfileToStorage(data.user);
   }, []);
 
   return { ...state, login, signup, logout, refresh, updateProfile };

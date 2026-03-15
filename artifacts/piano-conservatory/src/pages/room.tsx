@@ -24,7 +24,7 @@ const REACTION_SENTENCES = [
 ];
 
 // Read profile synchronously so useWebRTCRoom gets the correct initial values right away
-function loadProfile(): { displayName: string; avatarIndex: number } {
+function loadProfile(): { displayName: string; avatarIndex: number; customAvatarUrl?: string } {
   try {
     const saved = localStorage.getItem('piano-conservatory-profile');
     if (saved) {
@@ -108,7 +108,7 @@ export default function RoomPage() {
     reactions,
     sendReaction,
     intentionalCloseRef,
-  } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream);
+  } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream, profile.customAvatarUrl);
 
   // Close reaction picker when clicking outside
   useEffect(() => {
@@ -292,6 +292,7 @@ export default function RoomPage() {
               peerId={localData.peerId}
               displayName={localData.displayName}
               avatarIndex={localData.avatarIndex}
+              customAvatarUrl={localData.customAvatarUrl}
               isMuted={localData.isMuted}
               isCameraOff={localData.isCameraOff}
               isLidOpen={isLidOpen}
@@ -315,6 +316,7 @@ export default function RoomPage() {
                   peerId={peer.peerId}
                   displayName={peer.displayName}
                   avatarIndex={peer.avatarIndex}
+                  customAvatarUrl={peer.customAvatarUrl}
                   isMuted={peer.isMuted}
                   isCameraOff={peer.isCameraOff}
                   isLidOpen={peer.isLidOpen}

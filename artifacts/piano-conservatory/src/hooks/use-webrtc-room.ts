@@ -5,6 +5,7 @@ type PeerData = {
   peerId: string;
   displayName: string;
   avatarIndex: number;
+  customAvatarUrl?: string;
   isMuted: boolean;
   isCameraOff: boolean;
   isLidOpen: boolean;
@@ -20,6 +21,7 @@ export function useWebRTCRoom(
   initialDisplayName: string,
   initialAvatarIndex: number,
   providedStream: MediaStream | null,
+  initialCustomAvatarUrl?: string,
 ) {
   const myPeerId = useRef(nanoid()).current;
 
@@ -27,6 +29,7 @@ export function useWebRTCRoom(
     peerId: myPeerId,
     displayName: initialDisplayName || 'Anonymous Pianist',
     avatarIndex: initialAvatarIndex || 0,
+    customAvatarUrl: initialCustomAvatarUrl,
     isMuted: false,
     isCameraOff: false,
     isLidOpen: false,
@@ -138,6 +141,7 @@ export function useWebRTCRoom(
       ws.send(JSON.stringify({
         type: 'join', roomId, peerId: myPeerId,
         displayName: localData.displayName, avatarIndex: localData.avatarIndex,
+        customAvatarUrl: localData.customAvatarUrl,
       }));
     };
 
@@ -153,7 +157,7 @@ export function useWebRTCRoom(
         const existingPeers = (msg.peers as PeerData[]) ?? [];
         const map: Record<string, PeerData> = {};
         for (const p of existingPeers) {
-          map[p.peerId] = { ...p, isMuted: false, isCameraOff: false, isLidOpen: false };
+          map[p.peerId] = { ...p, customAvatarUrl: p.customAvatarUrl, isMuted: false, isCameraOff: false, isLidOpen: false };
           const pc = createPCRef.current(p.peerId);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -163,9 +167,9 @@ export function useWebRTCRoom(
         }
         setPeers(map);
       } else if (msg.type === 'peer-joined') {
-        const { peerId, displayName, avatarIndex } = msg as { peerId: string; displayName: string; avatarIndex: number };
+        const { peerId, displayName, avatarIndex, customAvatarUrl } = msg as { peerId: string; displayName: string; avatarIndex: number; customAvatarUrl?: string };
         if (peerId === myPeerId) return;
-        setPeers(prev => ({ ...prev, [peerId]: { peerId, displayName, avatarIndex, isMuted: false, isCameraOff: false, isLidOpen: false } }));
+        setPeers(prev => ({ ...prev, [peerId]: { peerId, displayName, avatarIndex, customAvatarUrl, isMuted: false, isCameraOff: false, isLidOpen: false } }));
       } else if (msg.type === 'signal') {
         const { fromPeerId, signal } = msg as { fromPeerId: string; signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit } };
         if (fromPeerId === myPeerId) return;

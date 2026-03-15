@@ -48,6 +48,7 @@ interface RoomCellProps {
   peerId: string;
   displayName?: string;
   avatarIndex?: number;
+  customAvatarUrl?: string;
   isMuted?: boolean;
   isCameraOff?: boolean;
   isLidOpen?: boolean;
@@ -60,6 +61,7 @@ interface RoomCellProps {
 export function RoomCell({
   displayName,
   avatarIndex = 0,
+  customAvatarUrl,
   isMuted = false,
   isCameraOff = false,
   isLidOpen = false,
@@ -171,19 +173,23 @@ export function RoomCell({
           cameraOff ? "opacity-100" : "opacity-0 pointer-events-none"
         )}>
           <img
-            src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
+            src={customAvatarUrl || `${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
             alt={displayName}
-            className="w-3/4 h-3/4 object-contain drop-shadow-lg"
+            className={cn("drop-shadow-lg", customAvatarUrl ? "w-3/4 h-3/4 object-cover rounded-2xl" : "w-3/4 h-3/4 object-contain")}
           />
         </div>
 
         {/* Small avatar sitting at piano — visible only when camera is on */}
         {!cameraOff && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 w-14 h-14 sm:w-18 sm:h-18 drop-shadow-md">
+          <div className={cn("absolute bottom-2 left-1/2 -translate-x-1/2 z-20 drop-shadow-md", customAvatarUrl ? "w-16 h-16 sm:w-20 sm:h-20" : "w-14 h-14 sm:w-18 sm:h-18")}>
             <img
-              src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
+              src={customAvatarUrl || `${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
               alt={displayName}
-              className={cn("w-full h-full object-contain", isLidOpen && "animate-bounce-subtle")}
+              className={cn(
+                "w-full h-full",
+                customAvatarUrl ? "object-cover rounded-full border-2 border-white/80" : "object-contain",
+                isLidOpen && "animate-bounce-subtle"
+              )}
             />
           </div>
         )}

@@ -36,7 +36,7 @@ router.post("/auth/signup", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO users (email, password_hash, display_name, avatar_index)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, email, display_name, avatar_index`,
+       RETURNING id, email, display_name, avatar_index, custom_avatar`,
       [emailLower, passwordHash, displayName.trim(), avatarIndex ?? 0]
     );
     const row = result.rows[0];
@@ -48,7 +48,7 @@ router.post("/auth/signup", async (req, res) => {
     };
     const token = signToken(user);
     setAuthCookie(res, token);
-    res.json({ user });
+    res.json({ user: { ...user, customAvatarUrl: row.custom_avatar ?? undefined } });
   } catch (err: any) {
     if (err.code === "23505") {
       res.status(409).json({ error: "An account with this email already exists" });
@@ -70,7 +70,7 @@ router.post("/auth/login", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `SELECT id, email, password_hash, display_name, avatar_index FROM users WHERE LOWER(email) = $1`,
+      `SELECT id, email, password_hash, display_name, avatar_index, custom_avatar FROM users WHERE LOWER(email) = $1`,
       [emailLower]
     );
     if (result.rows.length === 0) {
@@ -91,7 +91,7 @@ router.post("/auth/login", async (req, res) => {
     };
     const token = signToken(user);
     setAuthCookie(res, token);
-    res.json({ user });
+    res.json({ user: { ...user, customAvatarUrl: row.custom_avatar ?? undefined } });
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -104,9 +104,31 @@ router.post("/auth/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/auth/me — return current logged-in user
-router.get("/auth/me", requireAuth, (req, res) => {
-  res.json({ user: req.user });
+// GET /api/auth/me — return current logged-in user (queries DB for fresh custom_avatar)
+router.get("/auth/me", requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, email, display_name, avatar_index, custom_avatar FROM users WHERE id = $1`,
+      [req.user!.id]
+    );
+    if (result.rows.length === 0) {
+      res.status(401).json({ error: "User not found" });
+      return;
+    }
+    const row = result.rows[0];
+    res.json({
+      user: {
+        id: row.id,
+        email: row.email,
+        displayName: row.display_name,
+        avatarIndex: row.avatar_index,
+        customAvatarUrl: row.custom_avatar ?? undefined,
+      },
+    });
+  } catch (err) {
+    console.error("Me error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // POST /api/auth/forgot-password — generate reset token
@@ -139,11 +161,12 @@ router.post("/auth/forgot-password", async (req, res) => {
   }
 });
 
-// PUT /api/auth/profile — update display name and/or avatar
+// PUT /api/auth/profile — update display name, avatar index, and/or custom avatar photo
 router.put("/auth/profile", requireAuth, async (req, res) => {
-  const { displayName, avatarIndex } = req.body as {
+  const { displayName, avatarIndex, customAvatarUrl } = req.body as {
     displayName?: string;
     avatarIndex?: number;
+    customAvatarUrl?: string | null;
   };
   const userId = req.user!.id;
 
@@ -155,15 +178,34 @@ router.put("/auth/profile", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Avatar index must be 0–15" });
     return;
   }
+  // Validate custom avatar: must be a data URL or null/undefined
+  if (customAvatarUrl !== undefined && customAvatarUrl !== null) {
+    if (!customAvatarUrl.startsWith("data:image/")) {
+      res.status(400).json({ error: "customAvatarUrl must be an image data URL" });
+      return;
+    }
+    // Roughly 400KB base64 limit (~300KB image)
+    if (customAvatarUrl.length > 400_000) {
+      res.status(400).json({ error: "Custom avatar image is too large" });
+      return;
+    }
+  }
 
   try {
     const result = await pool.query(
       `UPDATE users
-       SET display_name = COALESCE($1, display_name),
-           avatar_index = COALESCE($2, avatar_index)
-       WHERE id = $3
-       RETURNING id, email, display_name, avatar_index`,
-      [displayName?.trim() ?? null, avatarIndex ?? null, userId]
+       SET display_name   = COALESCE($1, display_name),
+           avatar_index   = COALESCE($2, avatar_index),
+           custom_avatar  = CASE WHEN $3::boolean THEN $4 ELSE custom_avatar END
+       WHERE id = $5
+       RETURNING id, email, display_name, avatar_index, custom_avatar`,
+      [
+        displayName?.trim() ?? null,
+        avatarIndex ?? null,
+        customAvatarUrl !== undefined,   // whether to update custom_avatar column
+        customAvatarUrl ?? null,          // the new value (null removes it)
+        userId,
+      ]
     );
     const row = result.rows[0];
     const updatedUser: AuthUser = {
@@ -172,10 +214,12 @@ router.put("/auth/profile", requireAuth, async (req, res) => {
       displayName: row.display_name,
       avatarIndex: row.avatar_index,
     };
-    // Issue a fresh JWT with the new data
+    // Issue a fresh JWT with the (non-custom-avatar) data
     const token = signToken(updatedUser);
     setAuthCookie(res, token);
-    res.json({ user: updatedUser });
+    res.json({
+      user: { ...updatedUser, customAvatarUrl: row.custom_avatar ?? undefined },
+    });
   } catch (err) {
     console.error("Update profile error:", err);
     res.status(500).json({ error: "Internal server error" });

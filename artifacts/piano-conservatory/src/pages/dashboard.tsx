@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation, Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/hooks/use-auth";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, Plus, Clock, Calendar, ArrowLeft, Trophy, Music, Pencil, Check, X } from "lucide-react";
+import { Trash2, Plus, Clock, Calendar, ArrowLeft, Music, Pencil, Check, X, Camera, ImageOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Session {
@@ -70,15 +70,57 @@ export default function DashboardPage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [pendingAvatar, setPendingAvatar] = useState(user?.avatarIndex ?? 0);
   const [pendingName, setPendingName] = useState(user?.displayName ?? "");
+  const [pendingCustomAvatar, setPendingCustomAvatar] = useState<string | null | undefined>(undefined);
   const [savingProfile, setSavingProfile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Keep pending values in sync when user changes (e.g. after initial load)
   useEffect(() => {
     if (user && !editingProfile) {
       setPendingAvatar(user.avatarIndex);
       setPendingName(user.displayName);
+      setPendingCustomAvatar(undefined);
     }
   }, [user, editingProfile]);
+
+  // Resize image to max 200×200 and return a JPEG data URL
+  const resizeImage = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX = 200;
+        let { width, height } = img;
+        const ratio = Math.min(MAX / width, MAX / height, 1);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Please select an image file", variant: "destructive" });
+      return;
+    }
+    try {
+      const dataUrl = await resizeImage(file);
+      setPendingCustomAvatar(dataUrl);
+    } catch {
+      toast({ title: "Could not read that image", variant: "destructive" });
+    }
+    e.target.value = "";
+  };
 
   const handleSaveProfile = async () => {
     if (!pendingName.trim()) {
@@ -87,7 +129,13 @@ export default function DashboardPage() {
     }
     setSavingProfile(true);
     try {
-      await updateProfile({ displayName: pendingName.trim(), avatarIndex: pendingAvatar });
+      const patch: { displayName: string; avatarIndex: number; customAvatarUrl?: string | null } = {
+        displayName: pendingName.trim(),
+        avatarIndex: pendingAvatar,
+      };
+      // undefined = no change, null = remove, string = new photo
+      if (pendingCustomAvatar !== undefined) patch.customAvatarUrl = pendingCustomAvatar;
+      await updateProfile(patch);
       toast({ title: "Profile updated!" });
       setEditingProfile(false);
     } catch (err: any) {
@@ -198,15 +246,19 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2">
               {/* Avatar with edit button overlay */}
               <div className="relative group">
-                <img
-                  src={`${import.meta.env.BASE_URL}images/avatar-${editingProfile ? pendingAvatar : user.avatarIndex}.png`}
-                  alt={user.displayName}
-                  className="w-11 h-11 object-contain"
-                />
+                {(() => {
+                  const displayUrl = editingProfile
+                    ? (pendingCustomAvatar !== undefined ? pendingCustomAvatar : user.customAvatarUrl)
+                    : user.customAvatarUrl;
+                  return displayUrl
+                    ? <img src={displayUrl} alt={user.displayName} className="w-11 h-11 object-cover rounded-full border-2 border-foreground" />
+                    : <img src={`${import.meta.env.BASE_URL}images/avatar-${editingProfile ? pendingAvatar : user.avatarIndex}.png`} alt={user.displayName} className="w-11 h-11 object-contain" />;
+                })()}
                 <button
                   onClick={() => {
                     setPendingAvatar(user.avatarIndex);
                     setPendingName(user.displayName);
+                    setPendingCustomAvatar(undefined);
                     setEditingProfile(v => !v);
                   }}
                   className="absolute -bottom-1 -right-1 w-5 h-5 bg-primary border-2 border-white rounded-full flex items-center justify-center shadow-sm hover:bg-primary/80 transition-colors"
@@ -250,10 +302,64 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                {/* Avatar grid */}
+                {/* Custom photo upload */}
                 <div>
                   <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">
-                    Choose Avatar
+                    Profile Photo
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    {/* Preview */}
+                    <div className="w-16 h-16 rounded-2xl border-4 border-foreground overflow-hidden flex-shrink-0 bg-muted flex items-center justify-center">
+                      {(() => {
+                        const preview = pendingCustomAvatar !== undefined ? pendingCustomAvatar : user.customAvatarUrl;
+                        return preview
+                          ? <img src={preview} alt="Custom avatar" className="w-full h-full object-cover" />
+                          : <img src={`${import.meta.env.BASE_URL}images/avatar-${pendingAvatar}.png`} alt="Default avatar" className="w-full h-full object-contain p-1" />;
+                      })()}
+                    </div>
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleFileChange}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="gap-1.5 border-2 w-full justify-start"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        Upload Photo
+                      </Button>
+                      {(pendingCustomAvatar !== undefined ? pendingCustomAvatar : user.customAvatarUrl) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 border-2 border-destructive text-destructive hover:bg-destructive hover:text-white w-full justify-start"
+                          onClick={() => setPendingCustomAvatar(null)}
+                        >
+                          <ImageOff className="w-3.5 h-3.5" />
+                          Remove Photo
+                        </Button>
+                      )}
+                      <p className="text-[10px] text-muted-foreground leading-tight">
+                        Your photo replaces the avatar everywhere. Max 200×200px.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Avatar grid — used when no custom photo */}
+                <div>
+                  <Label className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 block">
+                    {(pendingCustomAvatar !== undefined ? pendingCustomAvatar : user.customAvatarUrl)
+                      ? "Fallback Avatar (used if photo removed)"
+                      : "Choose Avatar"}
                   </Label>
                   <div className="grid grid-cols-8 gap-1.5">
                     {Array.from({ length: 16 }).map((_, i) => (
