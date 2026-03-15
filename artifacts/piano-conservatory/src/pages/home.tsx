@@ -67,6 +67,7 @@ export default function Home() {
       localStorage.setItem('piano-conservatory-profile', JSON.stringify({
         displayName: user.displayName,
         avatarIndex: user.avatarIndex,
+        customAvatarUrl: user.customAvatarUrl,
       }));
     } else {
       const saved = localStorage.getItem('piano-conservatory-profile');
@@ -103,6 +104,7 @@ export default function Home() {
     localStorage.setItem('piano-conservatory-profile', JSON.stringify({
       displayName: displayName.trim() || 'Anonymous Pianist',
       avatarIndex,
+      customAvatarUrl: user?.customAvatarUrl,
     }));
   };
 

@@ -54,6 +54,7 @@ export function useAuthState(): AuthContext {
       if (res.ok) {
         const data = await res.json();
         setState({ user: data.user, loading: false });
+        syncProfileToStorage(data.user);
       } else {
         setState({ user: null, loading: false });
       }
