@@ -141,7 +141,7 @@ export function useWebRTCRoom(
     intentionalCloseRef.current = false;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+    const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws`);
     wsRef.current = ws;
 
     // Keepalive: send a ping every 10 seconds to prevent proxy idle-timeout

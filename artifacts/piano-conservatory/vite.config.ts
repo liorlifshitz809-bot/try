@@ -67,7 +67,7 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     proxy: {
-      "/ws": {
+      "/api/ws": {
         target: `ws://localhost:${process.env.API_SERVER_PORT || "8080"}`,
         ws: true,
         changeOrigin: true,
