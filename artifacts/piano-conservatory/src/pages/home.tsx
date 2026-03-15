@@ -54,7 +54,9 @@ export default function Home() {
       return;
     }
     saveProfile();
-    setLocation(`/room/${roomCode.trim()}`);
+    // Normalize to lowercase so "Morning" and "morning" go to the same room
+    const normalizedCode = roomCode.trim().toLowerCase();
+    setLocation(`/room/${normalizedCode}`);
   };
 
   return (
