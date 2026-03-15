@@ -1,0 +1,175 @@
+import { Router, type IRouter } from "express";
+import bcrypt from "bcryptjs";
+import { nanoid } from "nanoid";
+import { pool } from "@workspace/db";
+import {
+  signToken,
+  setAuthCookie,
+  clearAuthCookie,
+  requireAuth,
+  type AuthUser,
+} from "../middleware/auth.js";
+
+const router: IRouter = Router();
+
+// POST /api/auth/signup
+router.post("/auth/signup", async (req, res) => {
+  const { email, password, displayName, avatarIndex } = req.body as {
+    email?: string;
+    password?: string;
+    displayName?: string;
+    avatarIndex?: number;
+  };
+
+  if (!email || !password || !displayName) {
+    res.status(400).json({ error: "email, password, and displayName are required" });
+    return;
+  }
+  if (password.length < 6) {
+    res.status(400).json({ error: "Password must be at least 6 characters" });
+    return;
+  }
+  const emailLower = email.trim().toLowerCase();
+  const passwordHash = await bcrypt.hash(password, 12);
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO users (email, password_hash, display_name, avatar_index)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, email, display_name, avatar_index`,
+      [emailLower, passwordHash, displayName.trim(), avatarIndex ?? 0]
+    );
+    const row = result.rows[0];
+    const user: AuthUser = {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      avatarIndex: row.avatar_index,
+    };
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    res.json({ user });
+  } catch (err: any) {
+    if (err.code === "23505") {
+      res.status(409).json({ error: "An account with this email already exists" });
+    } else {
+      console.error("Signup error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+});
+
+// POST /api/auth/login
+router.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body as { email?: string; password?: string };
+  if (!email || !password) {
+    res.status(400).json({ error: "email and password are required" });
+    return;
+  }
+  const emailLower = email.trim().toLowerCase();
+
+  try {
+    const result = await pool.query(
+      `SELECT id, email, password_hash, display_name, avatar_index FROM users WHERE LOWER(email) = $1`,
+      [emailLower]
+    );
+    if (result.rows.length === 0) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+    const row = result.rows[0];
+    const valid = await bcrypt.compare(password, row.password_hash);
+    if (!valid) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+    const user: AuthUser = {
+      id: row.id,
+      email: row.email,
+      displayName: row.display_name,
+      avatarIndex: row.avatar_index,
+    };
+    const token = signToken(user);
+    setAuthCookie(res, token);
+    res.json({ user });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/auth/logout
+router.post("/auth/logout", (_req, res) => {
+  clearAuthCookie(res);
+  res.json({ ok: true });
+});
+
+// GET /api/auth/me — return current logged-in user
+router.get("/auth/me", requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
+// POST /api/auth/forgot-password — generate reset token
+router.post("/auth/forgot-password", async (req, res) => {
+  const { email } = req.body as { email?: string };
+  if (!email) {
+    res.status(400).json({ error: "email is required" });
+    return;
+  }
+  const emailLower = email.trim().toLowerCase();
+  try {
+    const result = await pool.query(`SELECT id FROM users WHERE LOWER(email) = $1`, [emailLower]);
+    if (result.rows.length === 0) {
+      // Don't reveal whether the email exists
+      res.json({ ok: true, message: "If that email exists, a reset link has been generated." });
+      return;
+    }
+    const userId = result.rows[0].id;
+    const token = nanoid(32);
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await pool.query(
+      `UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3`,
+      [token, expires, userId]
+    );
+    // In production this would be emailed. For now we return the token directly.
+    res.json({ ok: true, resetToken: token });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/auth/reset-password — use token to set new password
+router.post("/auth/reset-password", async (req, res) => {
+  const { token, password } = req.body as { token?: string; password?: string };
+  if (!token || !password) {
+    res.status(400).json({ error: "token and password are required" });
+    return;
+  }
+  if (password.length < 6) {
+    res.status(400).json({ error: "Password must be at least 6 characters" });
+    return;
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id FROM users WHERE reset_token = $1 AND reset_token_expires > NOW()`,
+      [token]
+    );
+    if (result.rows.length === 0) {
+      res.status(400).json({ error: "Reset token is invalid or has expired" });
+      return;
+    }
+    const userId = result.rows[0].id;
+    const passwordHash = await bcrypt.hash(password, 12);
+    await pool.query(
+      `UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2`,
+      [passwordHash, userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;

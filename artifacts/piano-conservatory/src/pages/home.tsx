@@ -1,19 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useLocation } from 'wouter';
+import { useLocation, Link } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Music, Play, Plus, Clock, DoorOpen } from 'lucide-react';
+import { Music, Play, Plus, Clock, DoorOpen, LayoutDashboard, LogIn, UserPlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 
 function slugify(text: string) {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .slice(0, 40);
+  return text.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 40);
 }
 
 function formatDuration(seconds: number | null): string {
@@ -53,6 +48,7 @@ type Session = {
 export default function Home() {
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user, loading: authLoading, logout } = useAuth();
 
   const [displayName, setDisplayName] = useState('');
   const [avatarIndex, setAvatarIndex] = useState(0);
@@ -62,17 +58,27 @@ export default function Home() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
-  // Load saved profile on mount
+  // Populate profile from auth or localStorage
   useEffect(() => {
-    const saved = localStorage.getItem('piano-conservatory-profile');
-    if (saved) {
-      try {
-        const p = JSON.parse(saved);
-        setDisplayName(p.displayName || '');
-        setAvatarIndex(p.avatarIndex || 0);
-      } catch {}
+    if (user) {
+      setDisplayName(user.displayName);
+      setAvatarIndex(user.avatarIndex);
+      // Also persist so room.tsx can read it synchronously
+      localStorage.setItem('piano-conservatory-profile', JSON.stringify({
+        displayName: user.displayName,
+        avatarIndex: user.avatarIndex,
+      }));
+    } else {
+      const saved = localStorage.getItem('piano-conservatory-profile');
+      if (saved) {
+        try {
+          const p = JSON.parse(saved);
+          setDisplayName(p.displayName || '');
+          setAvatarIndex(p.avatarIndex || 0);
+        } catch {}
+      }
     }
-  }, []);
+  }, [user]);
 
   const fetchSessions = useCallback(async (name: string) => {
     if (!name.trim()) { setSessions([]); return; }
@@ -83,14 +89,11 @@ export default function Home() {
         const data = await res.json();
         setSessions(data.sessions ?? []);
       }
-    } catch {
-      // silently fail — history is optional
-    } finally {
+    } catch {} finally {
       setSessionsLoading(false);
     }
   }, []);
 
-  // Fetch sessions when name is stable (debounced)
   useEffect(() => {
     const timer = setTimeout(() => fetchSessions(displayName), 600);
     return () => clearTimeout(timer);
@@ -99,7 +102,7 @@ export default function Home() {
   const saveProfile = () => {
     localStorage.setItem('piano-conservatory-profile', JSON.stringify({
       displayName: displayName.trim() || 'Anonymous Pianist',
-      avatarIndex
+      avatarIndex,
     }));
   };
 
@@ -125,14 +128,55 @@ export default function Home() {
       return;
     }
     saveProfile();
-    const normalizedCode = roomCode.trim().toLowerCase();
-    setLocation(`/room/${normalizedCode}`);
+    setLocation(`/room/${roomCode.trim().toLowerCase()}`);
   };
 
   const completedSessions = sessions.filter(s => s.left_at !== null);
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-facade relative overflow-hidden">
+    <div className="min-h-screen w-full flex flex-col items-center justify-start p-4 bg-facade relative overflow-hidden">
+
+      {/* Auth Header */}
+      <div className="w-full max-w-md mb-4 flex justify-end gap-2 pt-2">
+        {authLoading ? null : user ? (
+          <>
+            <Link href="/dashboard">
+              <Button variant="outline" size="sm" className="border-2 border-foreground gap-1.5 cartoon-shadow">
+                <LayoutDashboard className="w-4 h-4" />
+                Dashboard
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="border-2 border-foreground gap-1.5"
+              onClick={async () => {
+                await logout();
+                localStorage.removeItem('piano-conservatory-profile');
+                setDisplayName('');
+                setSessions([]);
+              }}
+            >
+              Sign Out
+            </Button>
+          </>
+        ) : (
+          <>
+            <Link href="/login">
+              <Button variant="outline" size="sm" className="border-2 border-foreground gap-1.5 cartoon-shadow">
+                <LogIn className="w-4 h-4" />
+                Sign In
+              </Button>
+            </Link>
+            <Link href="/signup">
+              <Button size="sm" className="gap-1.5">
+                <UserPlus className="w-4 h-4" />
+                Sign Up
+              </Button>
+            </Link>
+          </>
+        )}
+      </div>
 
       <div className="max-w-md w-full relative z-10">
         <motion.div
@@ -151,43 +195,61 @@ export default function Home() {
             Practice together in virtual rooms with real-time video!
           </p>
 
-          <div className="space-y-6 text-left">
-            <div>
-              <label className="block font-bold mb-2 text-foreground">Your Name</label>
-              <Input
-                placeholder="Mozart, Beethoven..."
-                value={displayName}
-                onChange={e => setDisplayName(e.target.value)}
-                maxLength={20}
+          {user && (
+            <div className="flex items-center gap-3 bg-primary/5 border-2 border-primary/30 rounded-xl px-4 py-2 mb-6 text-left">
+              <img
+                src={`${import.meta.env.BASE_URL}images/avatar-${user.avatarIndex}.png`}
+                alt={user.displayName}
+                className="w-10 h-10 object-contain"
               />
-            </div>
-
-            <div>
-              <label className="block font-bold mb-2 text-foreground">Choose an Avatar</label>
-              <div className="max-h-52 overflow-y-auto rounded-xl pr-1 -mr-1">
-                <div className="grid grid-cols-4 gap-2 sm:gap-3">
-                  {Array.from({ length: 16 }).map((_, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setAvatarIndex(i)}
-                      className={`relative rounded-xl border-4 transition-all overflow-hidden bg-background aspect-square flex items-center justify-center p-2
-                        ${avatarIndex === i
-                          ? 'border-primary cartoon-shadow scale-105'
-                          : 'border-transparent hover:border-muted-foreground/30 hover:scale-105'}`}
-                    >
-                      <img
-                        src={`${import.meta.env.BASE_URL}images/avatar-${i}.png`}
-                        alt={`Avatar ${i}`}
-                        className="w-full h-full object-contain drop-shadow-sm"
-                      />
-                      {avatarIndex === i && (
-                        <div className="absolute inset-0 bg-primary/10 rounded-lg pointer-events-none" />
-                      )}
-                    </button>
-                  ))}
-                </div>
+              <div>
+                <div className="font-bold text-sm">{user.displayName}</div>
+                <div className="text-xs text-muted-foreground">{user.email}</div>
               </div>
             </div>
+          )}
+
+          <div className="space-y-6 text-left">
+            {!user && (
+              <div>
+                <label className="block font-bold mb-2 text-foreground">Your Name</label>
+                <Input
+                  placeholder="Mozart, Beethoven..."
+                  value={displayName}
+                  onChange={e => setDisplayName(e.target.value)}
+                  maxLength={20}
+                />
+              </div>
+            )}
+
+            {!user && (
+              <div>
+                <label className="block font-bold mb-2 text-foreground">Choose an Avatar</label>
+                <div className="max-h-52 overflow-y-auto rounded-xl pr-1 -mr-1">
+                  <div className="grid grid-cols-4 gap-2 sm:gap-3">
+                    {Array.from({ length: 16 }).map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setAvatarIndex(i)}
+                        className={`relative rounded-xl border-4 transition-all overflow-hidden bg-background aspect-square flex items-center justify-center p-2
+                          ${avatarIndex === i
+                            ? 'border-primary cartoon-shadow scale-105'
+                            : 'border-transparent hover:border-muted-foreground/30 hover:scale-105'}`}
+                      >
+                        <img
+                          src={`${import.meta.env.BASE_URL}images/avatar-${i}.png`}
+                          alt={`Avatar ${i}`}
+                          className="w-full h-full object-contain drop-shadow-sm"
+                        />
+                        {avatarIndex === i && (
+                          <div className="absolute inset-0 bg-primary/10 rounded-lg pointer-events-none" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block font-bold mb-2 text-foreground">
@@ -244,11 +306,20 @@ export default function Home() {
               exit={{ opacity: 0, y: 10 }}
               className="bg-card border-4 border-foreground rounded-3xl p-5 cartoon-shadow"
             >
-              <div className="flex items-center gap-2 mb-3">
-                <Clock className="w-4 h-4 text-muted-foreground" />
-                <h2 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wider">
-                  Your Recent Sessions
-                </h2>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                  <h2 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wider">
+                    Recent Sessions
+                  </h2>
+                </div>
+                {user && (
+                  <Link href="/dashboard">
+                    <Button variant="ghost" size="sm" className="text-xs h-7 px-2">
+                      See all →
+                    </Button>
+                  </Link>
+                )}
               </div>
 
               {sessionsLoading && completedSessions.length === 0 ? (

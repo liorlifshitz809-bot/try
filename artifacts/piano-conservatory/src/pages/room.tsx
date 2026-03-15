@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRoute, useLocation } from 'wouter';
-import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera, Trophy } from 'lucide-react';
 import { useWebRTCRoom } from '@/hooks/use-webrtc-room';
 import { RoomCell } from '@/components/RoomCell';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Leaderboard } from '@/components/Leaderboard';
 
 // Read profile synchronously so useWebRTCRoom gets the correct initial values right away
 function loadProfile(): { displayName: string; avatarIndex: number } {
@@ -43,6 +44,9 @@ export default function RoomPage() {
   // Lid state & session tracking
   const [isLidOpen, setIsLidOpen] = useState(false);
   const activeSessionId = useRef<number | null>(null);
+
+  // Leaderboard panel
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   const handleStartCamera = useCallback(async () => {
     setRequestingPermission(true);
@@ -224,6 +228,21 @@ export default function RoomPage() {
         </div>
       </header>
 
+      {/* Leaderboard Sidebar */}
+      <AnimatePresence>
+        {showLeaderboard && (
+          <motion.div
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed right-4 top-20 z-40 w-72"
+          >
+            <Leaderboard roomId={roomId} currentUserName={profile.displayName} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Grid */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 flex items-center justify-center pb-32">
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
@@ -318,6 +337,17 @@ export default function RoomPage() {
           </Button>
 
           <div className="w-px h-8 bg-muted-foreground/20 mx-1"></div>
+
+          {/* Leaderboard Toggle */}
+          <Button
+            variant={showLeaderboard ? 'default' : 'outline'}
+            size="icon"
+            className="rounded-full w-12 h-12 sm:w-14 sm:h-14 border-4"
+            onClick={() => setShowLeaderboard(v => !v)}
+            title="Toggle Leaderboard"
+          >
+            <Trophy className="w-5 h-5" />
+          </Button>
 
           {/* Copy Link */}
           <Button
