@@ -152,11 +152,11 @@ export function RoomCell({
 
       <div className="relative z-10 flex flex-col items-center flex-1 w-full mt-2">
         {cameraOff ? (
-          <div className="flex items-center justify-center flex-1 w-full">
+          <div className="flex items-center justify-center flex-1 w-full px-4 py-2">
             <img
               src={`${import.meta.env.BASE_URL}images/avatar-${avatarIndex}.png`}
               alt={displayName}
-              className="w-32 h-32 sm:w-40 sm:h-40 object-contain drop-shadow-lg"
+              className="w-full h-full max-h-[70%] object-contain drop-shadow-lg"
             />
           </div>
         ) : (
