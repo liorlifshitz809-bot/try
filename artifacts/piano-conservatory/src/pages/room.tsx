@@ -1,12 +1,27 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRoute, useLocation } from 'wouter';
-import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera, Trophy } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera, Trophy, Smile } from 'lucide-react';
 import { useWebRTCRoom } from '@/hooks/use-webrtc-room';
 import { RoomCell } from '@/components/RoomCell';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Leaderboard } from '@/components/Leaderboard';
+
+const REACTION_EMOJIS = ['👍', '👏', '😄', '😂', '🔥', '❤️', '😮', '🤔'];
+const REACTION_SENTENCES = [
+  '״טוב חלאס עם הדיבורים״',
+  '״בהצלחה באימון!״',
+  '״חדל קשקשת, חפירות זה לווטסאפ״',
+  '״אין לי כוחחח״',
+  '״וואי כמה פדל שמתי״',
+  '״בואנה זה נשמע גרוע״',
+  '״בואנה זה נשמע מדהים״',
+  '״טוב התאמנתי מספיק להיום״',
+  '״קשה באימונים קל בקרב״',
+  '״הגיע הזמן לקצב״',
+  '״תכף אחזור״',
+];
 
 // Read profile synchronously so useWebRTCRoom gets the correct initial values right away
 function loadProfile(): { displayName: string; avatarIndex: number } {
@@ -48,6 +63,10 @@ export default function RoomPage() {
   // Leaderboard panel
   const [showLeaderboard, setShowLeaderboard] = useState(false);
 
+  // Reaction picker
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const reactionPickerRef = useRef<HTMLDivElement>(null);
+
   const handleStartCamera = useCallback(async () => {
     setRequestingPermission(true);
     setPermissionError(null);
@@ -86,7 +105,26 @@ export default function RoomPage() {
     toggleCamera,
     setLidOpenState,
     broadcastLidState,
+    reactions,
+    sendReaction,
   } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream);
+
+  // Close reaction picker when clicking outside
+  useEffect(() => {
+    if (!showReactionPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
+        setShowReactionPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showReactionPicker]);
+
+  const handleReaction = useCallback((text: string) => {
+    sendReaction(text);
+    setShowReactionPicker(false);
+  }, [sendReaction]);
 
   // Open/close the piano lid and track the practice session
   const handleToggleLid = useCallback(async () => {
@@ -257,6 +295,7 @@ export default function RoomPage() {
               isLidOpen={isLidOpen}
               stream={localStream}
               isLocal={true}
+              reaction={reactions[myPeerId]}
             />
           </motion.div>
 
@@ -279,6 +318,7 @@ export default function RoomPage() {
                   isLidOpen={peer.isLidOpen}
                   stream={streams[peer.peerId]}
                   isLocal={false}
+                  reaction={reactions[peer.peerId]}
                 />
               </motion.div>
             ))}
@@ -335,6 +375,53 @@ export default function RoomPage() {
             <span className="hidden sm:inline-block">{isLidOpen ? 'Close Lid' : 'Open Lid'}</span>
             <span className="sm:hidden">{isLidOpen ? '✓' : '+'}</span>
           </Button>
+
+          {/* Reaction Picker */}
+          <div className="relative" ref={reactionPickerRef}>
+            <Button
+              variant={showReactionPicker ? 'default' : 'outline'}
+              size="icon"
+              className="rounded-full w-12 h-12 sm:w-14 sm:h-14 border-4"
+              onClick={() => setShowReactionPicker(v => !v)}
+              title="Send Reaction"
+            >
+              <Smile className="w-5 h-5" />
+            </Button>
+            <AnimatePresence>
+              {showReactionPicker && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute bottom-16 left-1/2 -translate-x-1/2 bg-card border-4 border-foreground rounded-2xl cartoon-shadow p-3 w-64 sm:w-72"
+                >
+                  <div className="flex flex-wrap gap-2 justify-center mb-3">
+                    {REACTION_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleReaction(emoji)}
+                        className="text-2xl hover:scale-125 transition-transform p-1 rounded-lg hover:bg-muted active:scale-95"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="border-t-2 border-muted pt-2 max-h-48 overflow-y-auto space-y-1" dir="rtl">
+                    {REACTION_SENTENCES.map((sentence) => (
+                      <button
+                        key={sentence}
+                        onClick={() => handleReaction(sentence)}
+                        className="w-full text-right text-sm font-medium px-3 py-1.5 rounded-lg hover:bg-muted active:bg-muted/70 transition-colors"
+                      >
+                        {sentence}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           <div className="w-px h-8 bg-muted-foreground/20 mx-1"></div>
 

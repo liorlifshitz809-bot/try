@@ -38,6 +38,8 @@ export function useWebRTCRoom(
   const [peers, setPeers] = useState<Record<string, PeerData>>({});
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
   const [isConnected, setIsConnected] = useState(false);
+  const [reactions, setReactions] = useState<Record<string, string>>({});
+  const reactionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
@@ -84,6 +86,24 @@ export function useWebRTCRoom(
     pcsRef.current[targetPeerId] = pc;
     return pc;
   }, [roomId, myPeerId, sendWS]);
+
+  const setReactionForPeer = useCallback((peerId: string, text: string) => {
+    if (reactionTimers.current[peerId]) clearTimeout(reactionTimers.current[peerId]);
+    setReactions(prev => ({ ...prev, [peerId]: text }));
+    reactionTimers.current[peerId] = setTimeout(() => {
+      setReactions(prev => {
+        const next = { ...prev };
+        delete next[peerId];
+        return next;
+      });
+      delete reactionTimers.current[peerId];
+    }, 4000);
+  }, []);
+
+  const sendReaction = useCallback((text: string) => {
+    setReactionForPeer(myPeerId, text);
+    sendWS({ type: 'reaction', roomId, fromPeerId: myPeerId, text });
+  }, [myPeerId, roomId, sendWS, setReactionForPeer]);
 
   const handleSignal = useCallback(async (
     fromPeerId: string,
@@ -171,6 +191,11 @@ export function useWebRTCRoom(
         if (peerId !== myPeerId) {
           setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], isMuted, isCameraOff, isLidOpen } } : prev);
         }
+      } else if (msg.type === 'reaction') {
+        const { fromPeerId, text } = msg as { fromPeerId: string; text: string };
+        if (fromPeerId !== myPeerId) {
+          setReactionForPeer(fromPeerId, text);
+        }
       }
     };
 
@@ -182,8 +207,10 @@ export function useWebRTCRoom(
       ws.close();
       Object.values(pcsRef.current).forEach(pc => pc.close());
       pcsRef.current = {};
+      Object.values(reactionTimers.current).forEach(clearTimeout);
+      reactionTimers.current = {};
     };
-  }, [providedStream, roomId, myPeerId, localData.displayName, localData.avatarIndex, createPC, handleSignal, sendWS]);
+  }, [providedStream, roomId, myPeerId, localData.displayName, localData.avatarIndex, createPC, handleSignal, sendWS, setReactionForPeer]);
 
   const toggleMute = useCallback(() => {
     setMutedState(prev => {
@@ -218,5 +245,7 @@ export function useWebRTCRoom(
     toggleCamera,
     setLidOpenState,
     broadcastLidState,
+    reactions,
+    sendReaction,
   };
 }
