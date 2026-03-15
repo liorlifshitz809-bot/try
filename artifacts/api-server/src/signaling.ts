@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { pool } from "@workspace/db";
 
 interface PeerInfo {
   ws: WebSocket;
@@ -6,6 +7,7 @@ interface PeerInfo {
   roomId: string;
   displayName: string;
   avatarIndex: number;
+  sessionId?: number;
 }
 
 const rooms = new Map<string, Map<string, PeerInfo>>();
@@ -21,11 +23,40 @@ function broadcast(roomId: string, data: object, excludePeerId?: string) {
   }
 }
 
+async function recordJoin(peerId: string, displayName: string, roomId: string): Promise<number | undefined> {
+  try {
+    const result = await pool.query(
+      `INSERT INTO sessions (peer_id, display_name, room_id, joined_at)
+       VALUES ($1, $2, $3, NOW())
+       RETURNING id`,
+      [peerId, displayName, roomId]
+    );
+    return result.rows[0]?.id as number;
+  } catch (err) {
+    console.error("Failed to record session join:", err);
+    return undefined;
+  }
+}
+
+async function recordLeave(sessionId: number) {
+  try {
+    await pool.query(
+      `UPDATE sessions
+       SET left_at = NOW(),
+           duration_seconds = EXTRACT(EPOCH FROM (NOW() - joined_at))::INTEGER
+       WHERE id = $1`,
+      [sessionId]
+    );
+  } catch (err) {
+    console.error("Failed to record session leave:", err);
+  }
+}
+
 export function setupSignaling(wss: WebSocketServer) {
   wss.on("connection", (ws: WebSocket) => {
     let currentPeer: PeerInfo | null = null;
 
-    ws.on("message", (raw) => {
+    ws.on("message", async (raw) => {
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(raw.toString());
@@ -48,7 +79,9 @@ export function setupSignaling(wss: WebSocketServer) {
         }
         const room = rooms.get(roomId)!;
 
-        currentPeer = { ws, peerId, roomId, displayName, avatarIndex };
+        const sessionId = await recordJoin(peerId, displayName, roomId);
+
+        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, sessionId };
         room.set(peerId, currentPeer);
 
         const existingPeers = Array.from(room.values())
@@ -95,12 +128,17 @@ export function setupSignaling(wss: WebSocketServer) {
         }
       } else if (type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
+      } else if (type === "state-update") {
+        const { roomId: msgRoomId, isMuted, isCameraOff, peerId } = msg as {
+          roomId: string; peerId: string; isMuted: boolean; isCameraOff: boolean;
+        };
+        broadcast(msgRoomId ?? currentPeer?.roomId, { type: "state-update", peerId, isMuted, isCameraOff }, peerId as string);
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", async () => {
       if (!currentPeer) return;
-      const { roomId, peerId, displayName } = currentPeer;
+      const { roomId, peerId, displayName, sessionId } = currentPeer;
       const room = rooms.get(roomId);
       if (room) {
         room.delete(peerId);
@@ -109,6 +147,9 @@ export function setupSignaling(wss: WebSocketServer) {
         } else {
           broadcast(roomId, { type: "peer-left", peerId, displayName });
         }
+      }
+      if (sessionId !== undefined) {
+        await recordLeave(sessionId);
       }
       console.log(`Peer ${peerId} left room ${roomId}`);
     });

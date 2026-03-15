@@ -12,7 +12,8 @@ export default function RoomPage() {
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
 
-  const roomId = params?.roomId || 'demo';
+  // Normalize room ID to lowercase so "Morning" and "morning" are the same room
+  const roomId = (params?.roomId || 'demo').toLowerCase();
 
   const [profile, setProfile] = useState({ displayName: 'Anonymous', avatarIndex: 0 });
   const [profileLoaded, setProfileLoaded] = useState(false);
