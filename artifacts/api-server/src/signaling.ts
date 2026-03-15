@@ -77,11 +77,9 @@ export function setupSignaling(wss: WebSocketServer) {
         }
 
       } else if (type === "reaction") {
-        const { fromPeerId, text } = msg as { fromPeerId: string; text: string };
-        const targetRoom = currentPeer?.roomId ?? (msg.roomId as string);
-        if (targetRoom) {
-          broadcast(targetRoom, { type: "reaction", fromPeerId, text });
-        }
+        if (!currentPeer) return;
+        const { text } = msg as { text: string };
+        broadcast(currentPeer.roomId, { type: "reaction", fromPeerId: currentPeer.peerId, text });
 
       } else if (type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
