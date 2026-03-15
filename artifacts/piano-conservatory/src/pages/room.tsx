@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRoute, useLocation } from 'wouter';
 import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera } from 'lucide-react';
 import { useWebRTCRoom } from '@/hooks/use-webrtc-room';
@@ -7,73 +7,139 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Read profile synchronously so useWebRTCRoom gets the correct initial values right away
+function loadProfile(): { displayName: string; avatarIndex: number } {
+  try {
+    const saved = localStorage.getItem('piano-conservatory-profile');
+    if (saved) {
+      const p = JSON.parse(saved);
+      if (p.displayName) return p;
+    }
+  } catch {}
+  return { displayName: 'Anonymous', avatarIndex: 0 };
+}
+
 export default function RoomPage() {
   const [match, params] = useRoute('/room/:roomId');
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
 
-  // Normalize room ID to lowercase so "Morning" and "morning" are the same room
   const roomId = (params?.roomId || 'demo').toLowerCase();
 
-  const [profile, setProfile] = useState({ displayName: 'Anonymous', avatarIndex: 0 });
-  const [profileLoaded, setProfileLoaded] = useState(false);
+  // Profile loaded synchronously — hook captures the correct values immediately
+  const [profile] = useState(loadProfile);
 
-  // The stream is obtained via a user gesture (button tap) before mounting the WebRTC hook
+  // Redirect home if no profile was ever saved
+  useEffect(() => {
+    const saved = localStorage.getItem('piano-conservatory-profile');
+    if (!saved) setLocation('/');
+  }, [setLocation]);
+
+  // Stream is provided by the user tapping the "Allow Camera" button
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [requestingPermission, setRequestingPermission] = useState(false);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('piano-conservatory-profile');
-    if (saved) {
-      try { setProfile(JSON.parse(saved)); } catch {}
-    } else {
-      setLocation('/');
-    }
-    setProfileLoaded(true);
-  }, [setLocation]);
+  // Lid state & session tracking
+  const [isLidOpen, setIsLidOpen] = useState(false);
+  const activeSessionId = useRef<number | null>(null);
 
-  // Called directly from a button tap — satisfies iOS Safari's user-gesture requirement
   const handleStartCamera = useCallback(async () => {
     setRequestingPermission(true);
     setPermissionError(null);
     try {
+      // Try video + audio first
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       setLocalStream(stream);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('Permission denied') || msg.includes('NotAllowed') || msg.includes('dismissed')) {
-        setPermissionError('Camera and microphone access was denied. Please allow them in your browser settings and try again.');
-      } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
-        setPermissionError('No camera or microphone found on this device.');
-      } else {
-        setPermissionError('Could not start camera. Please check your permissions and try again.');
+    } catch (videoErr) {
+      // Fallback: try audio-only (some devices/browsers block video but not audio)
+      try {
+        const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        setLocalStream(audioOnly);
+        toast({ title: 'Camera not available', description: 'Joined with audio only — camera could not be accessed.' });
+      } catch {
+        const msg = videoErr instanceof Error ? videoErr.message : String(videoErr);
+        if (msg.includes('Permission denied') || msg.includes('NotAllowed') || msg.includes('dismissed')) {
+          setPermissionError('Camera and microphone access was denied. Tap the camera icon in your browser address bar to allow it, then try again.');
+        } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
+          setPermissionError('No camera or microphone found on this device.');
+        } else {
+          setPermissionError('Could not start camera. Make sure no other app is using it, then try again.');
+        }
       }
     } finally {
       setRequestingPermission(false);
     }
-  }, []);
+  }, [toast]);
 
   const {
     peers,
     streams,
     localData,
     isConnected,
+    myPeerId,
     toggleMute,
     toggleCamera,
+    setLidOpenState,
+    broadcastLidState,
   } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream);
+
+  // Open/close the piano lid and track the practice session
+  const handleToggleLid = useCallback(async () => {
+    const next = !isLidOpen;
+    setIsLidOpen(next);
+    setLidOpenState(next);
+    broadcastLidState(next);
+
+    if (next) {
+      // Opening lid → start a session
+      try {
+        const res = await fetch('/api/sessions/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ peerId: myPeerId, displayName: profile.displayName, roomId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          activeSessionId.current = data.sessionId;
+        }
+      } catch {/* non-critical */}
+    } else {
+      // Closing lid → end the session
+      if (activeSessionId.current !== null) {
+        try {
+          await fetch('/api/sessions/end', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: activeSessionId.current }),
+          });
+        } catch {/* non-critical */}
+        activeSessionId.current = null;
+      }
+    }
+  }, [isLidOpen, myPeerId, profile.displayName, roomId, setLidOpenState, broadcastLidState]);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
     toast({ title: 'Link Copied!', description: 'Send this link to friends so they can join.' });
   };
 
-  const handleLeave = () => {
+  const handleLeave = useCallback(async () => {
+    // Close the lid / end session if still open
+    if (isLidOpen && activeSessionId.current !== null) {
+      try {
+        await fetch('/api/sessions/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: activeSessionId.current }),
+        });
+      } catch {/* non-critical */}
+    }
     localStream?.getTracks().forEach(t => t.stop());
     setLocation('/');
-  };
+  }, [isLidOpen, localStream, setLocation]);
 
-  // Pre-join screen — shown until camera permission is granted
+  // Pre-join screen
   if (!localStream) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-facade">
@@ -84,26 +150,35 @@ export default function RoomPage() {
         >
           <div className="text-6xl mb-4">🎹</div>
           <h2 className="text-2xl font-display font-bold mb-1">Ready to Practice?</h2>
-          <p className="text-muted-foreground font-medium mb-2 text-sm">
+          <p className="text-muted-foreground font-medium mb-1 text-sm">
             Room: <span className="font-bold text-foreground">{roomId}</span>
           </p>
+          <p className="text-muted-foreground text-sm mb-2">
+            Joining as: <span className="font-bold text-foreground">{profile.displayName}</span>
+          </p>
           <p className="text-muted-foreground text-sm mb-6">
-            Tap below to allow your camera and microphone, then join the room.
+            Tap below to allow your camera and microphone, then join.
           </p>
 
           {permissionError && (
             <div className="bg-destructive/10 border-2 border-destructive text-destructive rounded-xl p-3 mb-4 text-sm font-medium text-left">
               {permissionError}
+              <button
+                className="block mt-2 text-xs underline font-normal"
+                onClick={() => setPermissionError(null)}
+              >
+                Dismiss
+              </button>
             </div>
           )}
 
           <Button
             onClick={handleStartCamera}
-            disabled={requestingPermission || !profileLoaded}
+            disabled={requestingPermission}
             className="w-full h-14 text-lg mb-3"
           >
             <Camera className="w-5 h-5 mr-2" />
-            {requestingPermission ? 'Asking for permission…' : 'Allow Camera & Mic'}
+            {requestingPermission ? 'Asking for permission…' : permissionError ? 'Try Again' : 'Allow Camera & Mic'}
           </Button>
 
           <Button variant="ghost" className="w-full" onClick={() => setLocation('/')}>
@@ -149,11 +224,10 @@ export default function RoomPage() {
         </div>
       </header>
 
-      {/* Grid Content */}
+      {/* Grid */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 flex items-center justify-center pb-32">
         <div className="w-full max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
 
-          {/* Local User */}
           <motion.div layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
             <RoomCell
               peerId={localData.peerId}
@@ -161,12 +235,12 @@ export default function RoomPage() {
               avatarIndex={localData.avatarIndex}
               isMuted={localData.isMuted}
               isCameraOff={localData.isCameraOff}
+              isLidOpen={isLidOpen}
               stream={localStream}
               isLocal={true}
             />
           </motion.div>
 
-          {/* Remote Peers */}
           <AnimatePresence>
             {peerList.map((peer) => (
               <motion.div
@@ -183,6 +257,7 @@ export default function RoomPage() {
                   avatarIndex={peer.avatarIndex}
                   isMuted={peer.isMuted}
                   isCameraOff={peer.isCameraOff}
+                  isLidOpen={peer.isLidOpen}
                   stream={streams[peer.peerId]}
                   isLocal={false}
                 />
@@ -190,7 +265,6 @@ export default function RoomPage() {
             ))}
           </AnimatePresence>
 
-          {/* Empty Rooms */}
           {Array.from({ length: emptyRoomsCount }).map((_, i) => (
             <div key={`empty-${i}`} className="hidden sm:block opacity-60">
               <RoomCell peerId={`empty-${i}`} isEmpty={true} />
@@ -201,46 +275,68 @@ export default function RoomPage() {
 
       {/* Bottom Toolbar */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
-        <div className="bg-card border-4 border-foreground p-3 rounded-3xl cartoon-shadow flex items-center gap-2 sm:gap-4 px-4 sm:px-6">
+        <div className="bg-card border-4 border-foreground p-3 rounded-3xl cartoon-shadow flex items-center gap-2 sm:gap-3 px-4 sm:px-5">
 
+          {/* Mute */}
           <Button
             variant={localData.isMuted ? 'destructive' : 'secondary'}
             size="icon"
-            className="rounded-full w-14 h-14 sm:w-16 sm:h-16"
+            className="rounded-full w-12 h-12 sm:w-14 sm:h-14"
             onClick={toggleMute}
             title={localData.isMuted ? 'Unmute' : 'Mute'}
           >
-            {localData.isMuted ? <MicOff className="w-6 h-6 sm:w-8 sm:h-8" /> : <Mic className="w-6 h-6 sm:w-8 sm:h-8" />}
+            {localData.isMuted ? <MicOff className="w-5 h-5 sm:w-6 sm:h-6" /> : <Mic className="w-5 h-5 sm:w-6 sm:h-6" />}
           </Button>
 
+          {/* Camera */}
           <Button
             variant={localData.isCameraOff ? 'destructive' : 'secondary'}
             size="icon"
-            className="rounded-full w-14 h-14 sm:w-16 sm:h-16"
+            className="rounded-full w-12 h-12 sm:w-14 sm:h-14"
             onClick={toggleCamera}
             title={localData.isCameraOff ? 'Turn Camera On' : 'Turn Camera Off'}
           >
-            {localData.isCameraOff ? <VideoOff className="w-6 h-6 sm:w-8 sm:h-8" /> : <Video className="w-6 h-6 sm:w-8 sm:h-8" />}
+            {localData.isCameraOff ? <VideoOff className="w-5 h-5 sm:w-6 sm:h-6" /> : <Video className="w-5 h-5 sm:w-6 sm:h-6" />}
           </Button>
 
-          <div className="w-1 h-10 bg-muted-foreground/20 rounded-full mx-1 sm:mx-2"></div>
+          <div className="w-px h-8 bg-muted-foreground/20 mx-1"></div>
 
+          {/* Piano Lid Toggle — the main new feature */}
+          <Button
+            variant={isLidOpen ? 'default' : 'outline'}
+            className={`rounded-full h-12 sm:h-14 px-4 sm:px-5 font-bold border-4 text-sm transition-all ${
+              isLidOpen
+                ? 'bg-green-500 hover:bg-green-600 border-green-700 text-white'
+                : 'border-foreground'
+            }`}
+            onClick={handleToggleLid}
+            title={isLidOpen ? 'Close Lid (stop recording)' : 'Open Lid (start recording)'}
+          >
+            <span className="text-lg mr-1 sm:mr-2">{isLidOpen ? '🎹' : '🎹'}</span>
+            <span className="hidden sm:inline-block">{isLidOpen ? 'Close Lid' : 'Open Lid'}</span>
+            <span className="sm:hidden">{isLidOpen ? '✓' : '+'}</span>
+          </Button>
+
+          <div className="w-px h-8 bg-muted-foreground/20 mx-1"></div>
+
+          {/* Copy Link */}
           <Button
             variant="outline"
             size="icon"
-            className="rounded-full w-14 h-14 sm:w-16 sm:h-16 border-4"
+            className="rounded-full w-12 h-12 sm:w-14 sm:h-14 border-4"
             onClick={handleCopyLink}
             title="Copy Invite Link"
           >
-            <Copy className="w-6 h-6 sm:w-7 sm:h-7" />
+            <Copy className="w-5 h-5" />
           </Button>
 
+          {/* Leave */}
           <Button
             variant="destructive"
-            className="rounded-full h-14 sm:h-16 px-6 font-bold text-lg ml-2"
+            className="rounded-full h-12 sm:h-14 px-4 sm:px-5 font-bold ml-1"
             onClick={handleLeave}
           >
-            <PhoneOff className="w-6 h-6 sm:mr-2" />
+            <PhoneOff className="w-5 h-5 sm:mr-2" />
             <span className="hidden sm:inline-block">Leave</span>
           </Button>
         </div>

@@ -7,6 +7,7 @@ type PeerData = {
   avatarIndex: number;
   isMuted: boolean;
   isCameraOff: boolean;
+  isLidOpen: boolean;
 };
 
 const ICE_SERVERS = [
@@ -18,7 +19,7 @@ export function useWebRTCRoom(
   roomId: string,
   initialDisplayName: string,
   initialAvatarIndex: number,
-  providedStream: MediaStream | null,  // stream is provided externally (from a user-gesture getUserMedia)
+  providedStream: MediaStream | null,
 ) {
   const myPeerId = useRef(nanoid()).current;
 
@@ -28,10 +29,12 @@ export function useWebRTCRoom(
     avatarIndex: initialAvatarIndex || 0,
     isMuted: false,
     isCameraOff: false,
+    isLidOpen: false,
   });
 
   const [mutedState, setMutedState] = useState(false);
   const [cameraOffState, setCameraOffState] = useState(false);
+  const [lidOpenState, setLidOpenState] = useState(false);
   const [peers, setPeers] = useState<Record<string, PeerData>>({});
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
   const [isConnected, setIsConnected] = useState(false);
@@ -63,21 +66,13 @@ export function useWebRTCRoom(
 
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        sendWS({
-          type: 'signal',
-          roomId,
-          targetPeerId,
-          fromPeerId: myPeerId,
-          signal: { type: 'candidate', candidate: e.candidate },
-        });
+        sendWS({ type: 'signal', roomId, targetPeerId, fromPeerId: myPeerId, signal: { type: 'candidate', candidate: e.candidate } });
       }
     };
 
     pc.ontrack = (e) => {
       const stream = e.streams[0];
-      if (stream) {
-        setStreams(prev => ({ ...prev, [targetPeerId]: stream }));
-      }
+      if (stream) setStreams(prev => ({ ...prev, [targetPeerId]: stream }));
     };
 
     pc.onconnectionstatechange = () => {
@@ -123,10 +118,8 @@ export function useWebRTCRoom(
     }
   }, [createPC, myPeerId, roomId, sendWS]);
 
-  // Only connect to WS once we have a stream (meaning user tapped and granted permissions)
   useEffect(() => {
     if (!providedStream) return;
-
     let mounted = true;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -137,11 +130,8 @@ export function useWebRTCRoom(
       if (!mounted) return;
       setIsConnected(true);
       ws.send(JSON.stringify({
-        type: 'join',
-        roomId,
-        peerId: myPeerId,
-        displayName: localData.displayName,
-        avatarIndex: localData.avatarIndex,
+        type: 'join', roomId, peerId: myPeerId,
+        displayName: localData.displayName, avatarIndex: localData.avatarIndex,
       }));
     };
 
@@ -149,14 +139,13 @@ export function useWebRTCRoom(
       if (!mounted) return;
       let msg: Record<string, unknown>;
       try { msg = JSON.parse(event.data); } catch { return; }
-
       if (msg.roomId && msg.roomId !== roomId) return;
 
       if (msg.type === 'room-joined') {
         const existingPeers = (msg.peers as PeerData[]) ?? [];
         const map: Record<string, PeerData> = {};
         for (const p of existingPeers) {
-          map[p.peerId] = { ...p, isMuted: false, isCameraOff: false };
+          map[p.peerId] = { ...p, isMuted: false, isCameraOff: false, isLidOpen: false };
           const pc = createPC(p.peerId);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -166,7 +155,7 @@ export function useWebRTCRoom(
       } else if (msg.type === 'peer-joined') {
         const { peerId, displayName, avatarIndex } = msg as { peerId: string; displayName: string; avatarIndex: number };
         if (peerId === myPeerId) return;
-        setPeers(prev => ({ ...prev, [peerId]: { peerId, displayName, avatarIndex, isMuted: false, isCameraOff: false } }));
+        setPeers(prev => ({ ...prev, [peerId]: { peerId, displayName, avatarIndex, isMuted: false, isCameraOff: false, isLidOpen: false } }));
       } else if (msg.type === 'signal') {
         const { fromPeerId, signal } = msg as { fromPeerId: string; signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit } };
         if (fromPeerId === myPeerId) return;
@@ -178,9 +167,9 @@ export function useWebRTCRoom(
         setPeers(prev => { const n = { ...prev }; delete n[peerId]; return n; });
         setStreams(prev => { const n = { ...prev }; delete n[peerId]; return n; });
       } else if (msg.type === 'state-update') {
-        const { peerId, isMuted, isCameraOff } = msg as { peerId: string; isMuted: boolean; isCameraOff: boolean };
+        const { peerId, isMuted, isCameraOff, isLidOpen } = msg as { peerId: string; isMuted: boolean; isCameraOff: boolean; isLidOpen: boolean };
         if (peerId !== myPeerId) {
-          setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], isMuted, isCameraOff } } : prev);
+          setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], isMuted, isCameraOff, isLidOpen } } : prev);
         }
       }
     };
@@ -200,27 +189,34 @@ export function useWebRTCRoom(
     setMutedState(prev => {
       const next = !prev;
       localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = !next; });
-      sendWS({ type: 'state-update', roomId, peerId: myPeerId, isMuted: next, isCameraOff: cameraOffState });
+      sendWS({ type: 'state-update', roomId, peerId: myPeerId, isMuted: next, isCameraOff: cameraOffState, isLidOpen: lidOpenState });
       return next;
     });
-  }, [roomId, myPeerId, cameraOffState, sendWS]);
+  }, [roomId, myPeerId, cameraOffState, lidOpenState, sendWS]);
 
   const toggleCamera = useCallback(() => {
     setCameraOffState(prev => {
       const next = !prev;
       localStreamRef.current?.getVideoTracks().forEach(t => { t.enabled = !next; });
-      sendWS({ type: 'state-update', roomId, peerId: myPeerId, isMuted: mutedState, isCameraOff: next });
+      sendWS({ type: 'state-update', roomId, peerId: myPeerId, isMuted: mutedState, isCameraOff: next, isLidOpen: lidOpenState });
       return next;
     });
-  }, [roomId, myPeerId, mutedState, sendWS]);
+  }, [roomId, myPeerId, mutedState, lidOpenState, sendWS]);
+
+  const broadcastLidState = useCallback((isLidOpen: boolean) => {
+    sendWS({ type: 'state-update', roomId, peerId: myPeerId, isMuted: mutedState, isCameraOff: cameraOffState, isLidOpen });
+  }, [roomId, myPeerId, mutedState, cameraOffState, sendWS]);
 
   return {
     peers,
     streams,
     localStream: providedStream,
-    localData: { ...localData, isMuted: mutedState, isCameraOff: cameraOffState },
+    localData: { ...localData, isMuted: mutedState, isCameraOff: cameraOffState, isLidOpen: lidOpenState },
     isConnected,
+    myPeerId,
     toggleMute,
     toggleCamera,
+    setLidOpenState,
+    broadcastLidState,
   };
 }

@@ -1,5 +1,4 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { pool } from "@workspace/db";
 
 interface PeerInfo {
   ws: WebSocket;
@@ -7,7 +6,6 @@ interface PeerInfo {
   roomId: string;
   displayName: string;
   avatarIndex: number;
-  sessionId?: number;
 }
 
 const rooms = new Map<string, Map<string, PeerInfo>>();
@@ -20,35 +18,6 @@ function broadcast(roomId: string, data: object, excludePeerId?: string) {
     if (peerId !== excludePeerId && peer.ws.readyState === WebSocket.OPEN) {
       peer.ws.send(message);
     }
-  }
-}
-
-async function recordJoin(peerId: string, displayName: string, roomId: string): Promise<number | undefined> {
-  try {
-    const result = await pool.query(
-      `INSERT INTO sessions (peer_id, display_name, room_id, joined_at)
-       VALUES ($1, $2, $3, NOW())
-       RETURNING id`,
-      [peerId, displayName, roomId]
-    );
-    return result.rows[0]?.id as number;
-  } catch (err) {
-    console.error("Failed to record session join:", err);
-    return undefined;
-  }
-}
-
-async function recordLeave(sessionId: number) {
-  try {
-    await pool.query(
-      `UPDATE sessions
-       SET left_at = NOW(),
-           duration_seconds = EXTRACT(EPOCH FROM (NOW() - joined_at))::INTEGER
-       WHERE id = $1`,
-      [sessionId]
-    );
-  } catch (err) {
-    console.error("Failed to record session leave:", err);
   }
 }
 
@@ -68,88 +37,58 @@ export function setupSignaling(wss: WebSocketServer) {
 
       if (type === "join") {
         const { roomId, peerId, displayName, avatarIndex } = msg as {
-          roomId: string;
-          peerId: string;
-          displayName: string;
-          avatarIndex: number;
+          roomId: string; peerId: string; displayName: string; avatarIndex: number;
         };
 
-        if (!rooms.has(roomId)) {
-          rooms.set(roomId, new Map());
-        }
+        if (!rooms.has(roomId)) rooms.set(roomId, new Map());
         const room = rooms.get(roomId)!;
 
-        const sessionId = await recordJoin(peerId, displayName, roomId);
-
-        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, sessionId };
+        currentPeer = { ws, peerId, roomId, displayName, avatarIndex };
         room.set(peerId, currentPeer);
 
         const existingPeers = Array.from(room.values())
           .filter((p) => p.peerId !== peerId)
-          .map((p) => ({
-            peerId: p.peerId,
-            displayName: p.displayName,
-            avatarIndex: p.avatarIndex,
-          }));
+          .map((p) => ({ peerId: p.peerId, displayName: p.displayName, avatarIndex: p.avatarIndex }));
 
-        ws.send(
-          JSON.stringify({
-            type: "room-joined",
-            roomId,
-            peers: existingPeers,
-          }),
-        );
-
-        broadcast(
-          roomId,
-          {
-            type: "peer-joined",
-            peerId,
-            displayName,
-            avatarIndex,
-          },
-          peerId,
-        );
+        ws.send(JSON.stringify({ type: "room-joined", roomId, peers: existingPeers }));
+        broadcast(roomId, { type: "peer-joined", peerId, displayName, avatarIndex }, peerId);
 
         console.log(`Peer ${peerId} (${displayName}) joined room ${roomId}. Room size: ${room.size}`);
+
       } else if (type === "signal") {
         const { targetPeerId, signal, fromPeerId } = msg as {
-          targetPeerId: string;
-          signal: unknown;
-          fromPeerId: string;
+          targetPeerId: string; signal: unknown; fromPeerId: string;
         };
         const roomId = currentPeer?.roomId ?? (msg.roomId as string);
         const room = rooms.get(roomId);
         const target = room?.get(targetPeerId);
         if (target && target.ws.readyState === WebSocket.OPEN) {
-          target.ws.send(
-            JSON.stringify({ type: "signal", fromPeerId, targetPeerId, roomId, signal }),
-          );
+          target.ws.send(JSON.stringify({ type: "signal", fromPeerId, targetPeerId, roomId, signal }));
         }
+
+      } else if (type === "state-update") {
+        // Broadcasts mute/camera/lid state changes to all peers in the room
+        const { roomId: msgRoomId, isMuted, isCameraOff, isLidOpen, peerId } = msg as {
+          roomId: string; peerId: string; isMuted: boolean; isCameraOff: boolean; isLidOpen: boolean;
+        };
+        const targetRoom = msgRoomId ?? currentPeer?.roomId;
+        if (targetRoom) {
+          broadcast(targetRoom, { type: "state-update", peerId, isMuted, isCameraOff, isLidOpen }, peerId as string);
+        }
+
       } else if (type === "ping") {
         ws.send(JSON.stringify({ type: "pong" }));
-      } else if (type === "state-update") {
-        const { roomId: msgRoomId, isMuted, isCameraOff, peerId } = msg as {
-          roomId: string; peerId: string; isMuted: boolean; isCameraOff: boolean;
-        };
-        broadcast(msgRoomId ?? currentPeer?.roomId, { type: "state-update", peerId, isMuted, isCameraOff }, peerId as string);
       }
     });
 
-    ws.on("close", async () => {
+    ws.on("close", () => {
       if (!currentPeer) return;
-      const { roomId, peerId, displayName, sessionId } = currentPeer;
+      const { roomId, peerId, displayName } = currentPeer;
       const room = rooms.get(roomId);
       if (room) {
         room.delete(peerId);
-        if (room.size === 0) {
-          rooms.delete(roomId);
-        } else {
-          broadcast(roomId, { type: "peer-left", peerId, displayName });
-        }
-      }
-      if (sessionId !== undefined) {
-        await recordLeave(sessionId);
+        if (room.size === 0) rooms.delete(roomId);
+        else broadcast(roomId, { type: "peer-left", peerId, displayName });
       }
       console.log(`Peer ${peerId} left room ${roomId}`);
     });
