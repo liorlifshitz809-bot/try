@@ -71,7 +71,7 @@ export default function Home() {
             <Music className="w-10 h-10 text-primary" />
           </div>
           <h1 className="text-4xl sm:text-5xl font-display text-foreground mb-2">
-            Piano Conservatory
+            צ'וצ'קו הובלות
           </h1>
           <p className="text-muted-foreground font-medium mb-8">
             Practice together in virtual rooms with real-time video!
