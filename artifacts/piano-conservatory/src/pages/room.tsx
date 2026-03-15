@@ -107,6 +107,7 @@ export default function RoomPage() {
     broadcastLidState,
     reactions,
     sendReaction,
+    intentionalCloseRef,
   } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream);
 
   // Close reaction picker when clicking outside
@@ -177,9 +178,10 @@ export default function RoomPage() {
         });
       } catch {/* non-critical */}
     }
+    intentionalCloseRef.current = true;
     localStream?.getTracks().forEach(t => t.stop());
     setLocation('/');
-  }, [isLidOpen, localStream, setLocation]);
+  }, [isLidOpen, localStream, setLocation, intentionalCloseRef]);
 
   // Pre-join screen
   if (!localStream) {

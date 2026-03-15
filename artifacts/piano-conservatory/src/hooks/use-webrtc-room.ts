@@ -41,12 +41,16 @@ export function useWebRTCRoom(
   const [reactions, setReactions] = useState<Record<string, string>>({});
   const reactionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
+  // reconnectKey increments to trigger a clean reconnect without leaving the room page
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const intentionalCloseRef = useRef(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const pcsRef = useRef<Record<string, RTCPeerConnection>>({});
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingCandidates = useRef<Record<string, RTCIceCandidateInit[]>>({});
 
-  // Keep localStreamRef in sync with providedStream
+  // Keep localStreamRef in sync
   useEffect(() => {
     localStreamRef.current = providedStream;
   }, [providedStream]);
@@ -105,46 +109,28 @@ export function useWebRTCRoom(
     sendWS({ type: 'reaction', roomId, fromPeerId: myPeerId, text });
   }, [myPeerId, roomId, sendWS, setReactionForPeer]);
 
-  const handleSignal = useCallback(async (
-    fromPeerId: string,
-    signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit }
-  ) => {
-    if (signal.type === 'offer') {
-      let pc = pcsRef.current[fromPeerId];
-      if (!pc) pc = createPC(fromPeerId);
-      await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
-      const pending = pendingCandidates.current[fromPeerId] ?? [];
-      for (const c of pending) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-      pendingCandidates.current[fromPeerId] = [];
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      sendWS({ type: 'signal', roomId, targetPeerId: fromPeerId, fromPeerId: myPeerId, signal: { type: 'answer', sdp: pc.localDescription?.sdp } });
-    } else if (signal.type === 'answer') {
-      const pc = pcsRef.current[fromPeerId];
-      if (pc && pc.signalingState === 'have-local-offer') {
-        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
-        const pending = pendingCandidates.current[fromPeerId] ?? [];
-        for (const c of pending) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-        pendingCandidates.current[fromPeerId] = [];
-      }
-    } else if (signal.type === 'candidate' && signal.candidate) {
-      const pc = pcsRef.current[fromPeerId];
-      if (pc && pc.remoteDescription) {
-        await pc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(() => {});
-      } else {
-        if (!pendingCandidates.current[fromPeerId]) pendingCandidates.current[fromPeerId] = [];
-        pendingCandidates.current[fromPeerId].push(signal.candidate);
-      }
-    }
-  }, [createPC, myPeerId, roomId, sendWS]);
+  // Store latest callbacks in refs so the WS effect doesn't need them as deps
+  // (avoids any accidental reconnect from a function reference changing)
+  const createPCRef = useRef(createPC);
+  createPCRef.current = createPC;
+  const setReactionForPeerRef = useRef(setReactionForPeer);
+  setReactionForPeerRef.current = setReactionForPeer;
 
   useEffect(() => {
     if (!providedStream) return;
     let mounted = true;
+    intentionalCloseRef.current = false;
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     wsRef.current = ws;
+
+    // Keepalive: send a ping every 20 seconds to prevent proxy idle-timeout
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 20000);
 
     ws.onopen = () => {
       if (!mounted) return;
@@ -161,15 +147,19 @@ export function useWebRTCRoom(
       try { msg = JSON.parse(event.data); } catch { return; }
       if (msg.roomId && msg.roomId !== roomId) return;
 
-      if (msg.type === 'room-joined') {
+      if (msg.type === 'pong') {
+        // keepalive acknowledged — nothing to do
+      } else if (msg.type === 'room-joined') {
         const existingPeers = (msg.peers as PeerData[]) ?? [];
         const map: Record<string, PeerData> = {};
         for (const p of existingPeers) {
           map[p.peerId] = { ...p, isMuted: false, isCameraOff: false, isLidOpen: false };
-          const pc = createPC(p.peerId);
+          const pc = createPCRef.current(p.peerId);
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          sendWS({ type: 'signal', roomId, targetPeerId: p.peerId, fromPeerId: myPeerId, signal: { type: 'offer', sdp: pc.localDescription?.sdp } });
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'signal', roomId, targetPeerId: p.peerId, fromPeerId: myPeerId, signal: { type: 'offer', sdp: pc.localDescription?.sdp } }));
+          }
         }
         setPeers(map);
       } else if (msg.type === 'peer-joined') {
@@ -179,7 +169,36 @@ export function useWebRTCRoom(
       } else if (msg.type === 'signal') {
         const { fromPeerId, signal } = msg as { fromPeerId: string; signal: { type: string; sdp?: string; candidate?: RTCIceCandidateInit } };
         if (fromPeerId === myPeerId) return;
-        await handleSignal(fromPeerId, signal);
+        // Inline signal handling to avoid callback deps
+        if (signal.type === 'offer') {
+          let pc = pcsRef.current[fromPeerId];
+          if (!pc) pc = createPCRef.current(fromPeerId);
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+          const pending = pendingCandidates.current[fromPeerId] ?? [];
+          for (const c of pending) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          pendingCandidates.current[fromPeerId] = [];
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'signal', roomId, targetPeerId: fromPeerId, fromPeerId: myPeerId, signal: { type: 'answer', sdp: pc.localDescription?.sdp } }));
+          }
+        } else if (signal.type === 'answer') {
+          const pc = pcsRef.current[fromPeerId];
+          if (pc && pc.signalingState === 'have-local-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+            const pending = pendingCandidates.current[fromPeerId] ?? [];
+            for (const c of pending) await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+            pendingCandidates.current[fromPeerId] = [];
+          }
+        } else if (signal.type === 'candidate' && signal.candidate) {
+          const pc = pcsRef.current[fromPeerId];
+          if (pc && pc.remoteDescription) {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(() => {});
+          } else {
+            if (!pendingCandidates.current[fromPeerId]) pendingCandidates.current[fromPeerId] = [];
+            pendingCandidates.current[fromPeerId].push(signal.candidate);
+          }
+        }
       } else if (msg.type === 'peer-left') {
         const { peerId } = msg as { peerId: string };
         pcsRef.current[peerId]?.close();
@@ -194,23 +213,42 @@ export function useWebRTCRoom(
       } else if (msg.type === 'reaction') {
         const { fromPeerId, text } = msg as { fromPeerId: string; text: string };
         if (fromPeerId !== myPeerId) {
-          setReactionForPeer(fromPeerId, text);
+          setReactionForPeerRef.current(fromPeerId, text);
         }
       }
     };
 
     ws.onerror = () => { if (mounted) setIsConnected(false); };
-    ws.onclose = () => { if (mounted) setIsConnected(false); };
+
+    ws.onclose = () => {
+      clearInterval(pingInterval);
+      if (!mounted) return;
+      setIsConnected(false);
+      // Auto-reconnect if this wasn't an intentional close (user leaving the room)
+      if (!intentionalCloseRef.current) {
+        setTimeout(() => {
+          if (mounted) {
+            setPeers({});
+            setStreams({});
+            setReconnectKey(k => k + 1);
+          }
+        }, 2000);
+      }
+    };
 
     return () => {
       mounted = false;
+      clearInterval(pingInterval);
       ws.close();
       Object.values(pcsRef.current).forEach(pc => pc.close());
       pcsRef.current = {};
       Object.values(reactionTimers.current).forEach(clearTimeout);
       reactionTimers.current = {};
     };
-  }, [providedStream, roomId, myPeerId, localData.displayName, localData.avatarIndex, createPC, handleSignal, sendWS, setReactionForPeer]);
+  // Only reconnect when stream arrives, room changes, or reconnectKey bumps.
+  // All callbacks accessed via refs so they are excluded from deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providedStream, roomId, reconnectKey]);
 
   const toggleMute = useCallback(() => {
     setMutedState(prev => {
@@ -247,5 +285,6 @@ export function useWebRTCRoom(
     broadcastLidState,
     reactions,
     sendReaction,
+    intentionalCloseRef,
   };
 }
