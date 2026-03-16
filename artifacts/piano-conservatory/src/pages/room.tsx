@@ -72,6 +72,25 @@ export default function RoomPage() {
   const [inviteFriends, setInviteFriends] = useState<{ id: number; displayName: string; avatarIndex: number; customAvatarUrl?: string; online: boolean; roomId: string | null }[]>([]);
   const [inviteSending, setInviteSending] = useState<Set<number>>(new Set());
 
+  // Friends badge count (poll every 30s while logged in)
+  const [friendsBadge, setFriendsBadge] = useState(0);
+
+  useEffect(() => {
+    if (!user) { setFriendsBadge(0); return; }
+    const fetchBadge = async () => {
+      try {
+        const res = await fetch('/api/friends/badge-count', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setFriendsBadge(data.count);
+        }
+      } catch {}
+    };
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
   // Reaction picker
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
@@ -362,20 +381,37 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="bg-card/90 backdrop-blur border-4 border-foreground px-4 py-2 rounded-2xl flex items-center gap-2 cartoon-shadow">
-          <span className="relative flex h-3 w-3">
-            {isConnected ? (
-              <>
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500 border border-foreground"></span>
-              </>
-            ) : (
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500 border border-foreground"></span>
-            )}
-          </span>
-          <span className="font-bold text-sm hidden sm:inline-block">
-            {isConnected ? 'Live' : 'Connecting…'}
-          </span>
+        <div className="flex items-center gap-2">
+          {user && (
+            <button
+              onClick={() => setLocation('/friends')}
+              className="relative bg-card/90 backdrop-blur border-4 border-foreground px-3 py-2 rounded-2xl flex items-center gap-1.5 cartoon-shadow hover:bg-card transition-colors"
+              title="Friends"
+            >
+              <Users className="w-4 h-4" />
+              <span className="font-bold text-sm hidden sm:inline-block">Friends</span>
+              {friendsBadge > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+                  {friendsBadge}
+                </span>
+              )}
+            </button>
+          )}
+          <div className="bg-card/90 backdrop-blur border-4 border-foreground px-4 py-2 rounded-2xl flex items-center gap-2 cartoon-shadow">
+            <span className="relative flex h-3 w-3">
+              {isConnected ? (
+                <>
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500 border border-foreground"></span>
+                </>
+              ) : (
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500 border border-foreground"></span>
+              )}
+            </span>
+            <span className="font-bold text-sm hidden sm:inline-block">
+              {isConnected ? 'Live' : 'Connecting…'}
+            </span>
+          </div>
         </div>
       </header>
 
