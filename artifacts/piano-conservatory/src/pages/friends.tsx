@@ -123,6 +123,12 @@ export default function FriendsPage() {
     fetchFriends();
     fetchRequests();
     fetchInvitations();
+    const interval = setInterval(() => {
+      fetchFriends();
+      fetchRequests();
+      fetchInvitations();
+    }, 30000);
+    return () => clearInterval(interval);
   }, [user, fetchFriends, fetchRequests, fetchInvitations]);
 
   useEffect(() => {
