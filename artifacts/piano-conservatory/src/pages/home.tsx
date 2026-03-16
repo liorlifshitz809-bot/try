@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocation, Link } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Music, Play, Plus, Clock, DoorOpen, LayoutDashboard, LogIn, UserPlus } from 'lucide-react';
+import { Music, Play, Plus, Clock, DoorOpen, LayoutDashboard, LogIn, UserPlus, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
@@ -57,6 +57,7 @@ export default function Home() {
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [friendsBadge, setFriendsBadge] = useState(0);
 
   // Populate profile from auth or localStorage
   useEffect(() => {
@@ -100,6 +101,22 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [displayName, fetchSessions]);
 
+  useEffect(() => {
+    if (!user) { setFriendsBadge(0); return; }
+    const fetchBadge = async () => {
+      try {
+        const res = await fetch('/api/friends/badge-count', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setFriendsBadge(data.count);
+        }
+      } catch {}
+    };
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
   const saveProfile = () => {
     localStorage.setItem('piano-conservatory-profile', JSON.stringify({
       displayName: displayName.trim() || 'Anonymous Pianist',
@@ -142,6 +159,17 @@ export default function Home() {
       <div className="w-full max-w-md mb-4 flex justify-end gap-2 pt-2">
         {authLoading ? null : user ? (
           <>
+            <Link href="/friends">
+              <Button variant="outline" size="sm" className="border-2 border-foreground gap-1.5 cartoon-shadow relative">
+                <Users className="w-4 h-4" />
+                Friends
+                {friendsBadge > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center animate-pulse">
+                    {friendsBadge}
+                  </span>
+                )}
+              </Button>
+            </Link>
             <Link href="/dashboard">
               <Button variant="outline" size="sm" className="border-2 border-foreground gap-1.5 cartoon-shadow">
                 <LayoutDashboard className="w-4 h-4" />

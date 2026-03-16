@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRoute, useLocation } from 'wouter';
-import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera, Trophy, Smile } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Copy, PhoneOff, Music, Camera, Trophy, Smile, Users } from 'lucide-react';
 import { useWebRTCRoom } from '@/hooks/use-webrtc-room';
 import { RoomCell } from '@/components/RoomCell';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Leaderboard } from '@/components/Leaderboard';
 
@@ -41,6 +42,7 @@ export default function RoomPage() {
   const [match, params] = useRoute('/room/:roomId');
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const roomId = (params?.roomId || 'demo').toLowerCase();
 
@@ -64,6 +66,11 @@ export default function RoomPage() {
 
   // Leaderboard panel
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  // Invite friends panel
+  const [showInvitePanel, setShowInvitePanel] = useState(false);
+  const [inviteFriends, setInviteFriends] = useState<{ id: number; displayName: string; avatarIndex: number; customAvatarUrl?: string; online: boolean; roomId: string | null }[]>([]);
+  const [inviteSending, setInviteSending] = useState<Set<number>>(new Set());
 
   // Reaction picker
   const [showReactionPicker, setShowReactionPicker] = useState(false);
@@ -169,7 +176,7 @@ export default function RoomPage() {
     reactions,
     sendReaction,
     intentionalCloseRef,
-  } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream, profile.customAvatarUrl);
+  } = useWebRTCRoom(roomId, profile.displayName, profile.avatarIndex, localStream, profile.customAvatarUrl, user?.id);
 
   // Close reaction picker when clicking outside
   useEffect(() => {
@@ -222,6 +229,39 @@ export default function RoomPage() {
       }
     }
   }, [isLidOpen, myPeerId, profile.displayName, roomId, setLidOpenState, broadcastLidState]);
+
+  const handleOpenInvitePanel = useCallback(async () => {
+    setShowInvitePanel(true);
+    try {
+      const res = await fetch('/api/friends', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setInviteFriends(data.friends);
+      }
+    } catch {}
+  }, []);
+
+  const handleInviteFriend = useCallback(async (toUserId: number) => {
+    setInviteSending(s => new Set(s).add(toUserId));
+    try {
+      const res = await fetch('/api/friends/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ toUserId, roomId }),
+      });
+      if (res.ok) {
+        toast({ title: 'Invitation sent!' });
+      } else {
+        const data = await res.json();
+        toast({ title: 'Error', description: data.error, variant: 'destructive' });
+      }
+    } catch {
+      toast({ title: 'Error', description: 'Network error', variant: 'destructive' });
+    } finally {
+      setInviteSending(s => { const n = new Set(s); n.delete(toUserId); return n; });
+    }
+  }, [roomId, toast]);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -350,6 +390,69 @@ export default function RoomPage() {
             className="fixed right-4 top-20 z-40 w-72"
           >
             <Leaderboard roomId={roomId} currentUserName={profile.displayName} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Invite Friends Panel */}
+      <AnimatePresence>
+        {showInvitePanel && user && (
+          <motion.div
+            initial={{ x: '-100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '-100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="fixed left-4 top-20 z-40 w-72"
+          >
+            <div className="bg-card border-4 border-foreground rounded-2xl cartoon-shadow p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-display font-bold text-sm flex items-center gap-1.5">
+                  <Users className="w-4 h-4" />
+                  Invite Friends
+                </h3>
+                <button onClick={() => setShowInvitePanel(false)} className="text-muted-foreground hover:text-foreground text-lg leading-none">&times;</button>
+              </div>
+              {inviteFriends.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-3">No friends yet</p>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {inviteFriends.map(f => (
+                    <div key={f.id} className="flex items-center gap-2 p-2 rounded-xl bg-background">
+                      <div className="relative shrink-0">
+                        <img
+                          src={f.customAvatarUrl || `${import.meta.env.BASE_URL}images/avatar-${f.avatarIndex}.png`}
+                          alt={f.displayName}
+                          className={`w-8 h-8 ${f.customAvatarUrl ? 'rounded-full object-cover border-2 border-foreground' : 'object-contain'}`}
+                        />
+                        <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-card ${f.online ? 'bg-green-500' : 'bg-gray-300'}`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-xs truncate">{f.displayName}</p>
+                        {f.online && f.roomId === roomId ? (
+                          <p className="text-[10px] text-green-600">Already here</p>
+                        ) : f.online ? (
+                          <p className="text-[10px] text-green-600">In {f.roomId}</p>
+                        ) : (
+                          <p className="text-[10px] text-muted-foreground">Offline</p>
+                        )}
+                      </div>
+                      {f.online && f.roomId === roomId ? (
+                        <span className="text-[10px] text-muted-foreground font-medium">Here</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => handleInviteFriend(f.id)}
+                          disabled={inviteSending.has(f.id)}
+                          className="h-7 text-[10px] px-2"
+                        >
+                          Invite
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -500,6 +603,19 @@ export default function RoomPage() {
           </div>
 
           <div className="w-px h-8 bg-muted-foreground/20 mx-1"></div>
+
+          {/* Invite Friends */}
+          {user && (
+            <Button
+              variant={showInvitePanel ? 'default' : 'outline'}
+              size="icon"
+              className="rounded-full w-12 h-12 sm:w-14 sm:h-14 border-4"
+              onClick={() => showInvitePanel ? setShowInvitePanel(false) : handleOpenInvitePanel()}
+              title="Invite Friends"
+            >
+              <Users className="w-5 h-5" />
+            </Button>
+          )}
 
           {/* Leaderboard Toggle */}
           <Button

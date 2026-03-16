@@ -7,6 +7,7 @@ interface PeerInfo {
   displayName: string;
   avatarIndex: number;
   customAvatarUrl?: string;
+  userId?: number;
 }
 
 const rooms = new Map<string, Map<string, PeerInfo>>();
@@ -37,14 +38,14 @@ export function setupSignaling(wss: WebSocketServer) {
       const type = msg.type as string;
 
       if (type === "join") {
-        const { roomId, peerId, displayName, avatarIndex, customAvatarUrl } = msg as {
-          roomId: string; peerId: string; displayName: string; avatarIndex: number; customAvatarUrl?: string;
+        const { roomId, peerId, displayName, avatarIndex, customAvatarUrl, userId } = msg as {
+          roomId: string; peerId: string; displayName: string; avatarIndex: number; customAvatarUrl?: string; userId?: number;
         };
 
         if (!rooms.has(roomId)) rooms.set(roomId, new Map());
         const room = rooms.get(roomId)!;
 
-        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, customAvatarUrl };
+        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, customAvatarUrl, userId };
         room.set(peerId, currentPeer);
 
         const existingPeers = Array.from(room.values())
@@ -111,4 +112,16 @@ export function getRoomParticipantCount(roomId: string): number {
 
 export function roomExists(roomId: string): boolean {
   return rooms.has(roomId);
+}
+
+export function getOnlineUserRooms(): Map<number, string> {
+  const result = new Map<number, string>();
+  for (const [roomId, room] of rooms) {
+    for (const [, peer] of room) {
+      if (peer.userId) {
+        result.set(peer.userId, roomId);
+      }
+    }
+  }
+  return result;
 }

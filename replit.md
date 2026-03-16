@@ -25,13 +25,15 @@ pnpm workspace monorepo using TypeScript. Piano Conservatory — a multi-pianist
 - Cartoon conservatory building with a grid of practice rooms (max 9 per room)
 - WebRTC peer-to-peer video/audio via a WebSocket signaling server
 - Mute/unmute microphone, toggle camera on/off
-- 16 cartoon animal/character avatars
+- 16 cartoon animal/character avatars + custom photo upload
 - **Piano lid toggle**: open lid = recording practice time; close lid = session ends
 - Sessions under 1 minute auto-deleted on lid-close
 - **Full auth system**: signup, login, logout, forgot-password, reset-password
 - **Personal dashboard**: view today's sessions, practice history by day, total stats, streak counter, manual session logging
 - **Daily leaderboard per room**: top 10 practitioners today, auto-refreshes every 30s
 - **Session history**: home page shows recent sessions linked to rooms
+- **Friend system**: search users, send/accept/reject friend requests, see friends' online status and which room they're in, join friends' rooms directly, invite friends from inside a room, notification badge for pending requests and invitations
+- **Reactions system**: emojis + Hebrew preset sentences displayed in real-time to all peers in a room
 
 ## DB Schema
 
@@ -42,6 +44,13 @@ pnpm workspace monorepo using TypeScript. Piano Conservatory — a multi-pianist
 - `id` SERIAL PK, `peer_id`, `display_name`, `room_id`, `joined_at`, `left_at`, `duration_seconds`
 - `user_id` FK → users (nullable for anonymous), `notes`, `session_date` DATE, `is_manual` BOOL
 - Auto-deleted if duration < 60 seconds
+
+### `friendships` table
+- `id` SERIAL PK, `requester_id` FK → users, `addressee_id` FK → users, `status` ('pending'|'accepted'|'rejected'), `created_at`
+- UNIQUE(requester_id, addressee_id)
+
+### `room_invitations` table
+- `id` SERIAL PK, `from_user_id` FK → users, `to_user_id` FK → users, `room_id` TEXT, `created_at`, `expires_at`, `seen` BOOL
 
 ### `daily_leaderboard` view
 - Aggregates `total_seconds` and `session_count` per `display_name` per `room_id` per `session_date`
@@ -67,15 +76,27 @@ pnpm workspace monorepo using TypeScript. Piano Conservatory — a multi-pianist
 - `POST /api/sessions/end` — end session + auto-delete if < 60s
 - `GET /api/leaderboard/:roomId` — today's top 10 by total practice time
 
+### Friends (all require auth)
+- `GET /api/users/search?q=` — search users by display name (ILIKE, limit 10)
+- `POST /api/friends/request` — send friend request `{ addresseeId }`
+- `POST /api/friends/respond` — accept/reject `{ requesterId, action }`
+- `GET /api/friends` — accepted friends with live online presence
+- `GET /api/friends/requests` — pending incoming requests
+- `POST /api/friends/invite` — invite friend to room `{ toUserId, roomId }` (30-min expiry)
+- `GET /api/friends/invitations` — pending non-expired invitations
+- `PATCH /api/friends/invitations/:id/seen` — mark invitation as seen
+- `GET /api/friends/badge-count` — combined count of pending requests + unseen invitations
+
 ## Frontend Routes
 
-- `/` — Home (join/create room; shows auth state)
+- `/` — Home (join/create room; shows auth state; Friends nav link with badge when logged in)
 - `/login` — Login page
 - `/signup` — Signup page (with avatar picker)
 - `/forgot-password` — Forgot password
 - `/reset-password?token=...` — Reset password
 - `/dashboard` — Personal dashboard (protected; redirects to /login if not authed)
-- `/room/:roomId` — Live practice room with video, piano lid, leaderboard
+- `/friends` — Friends page (search, requests, friends list with live status, invitations)
+- `/room/:roomId` — Live practice room with video, piano lid, leaderboard, invite friends
 
 ## Structure
 
@@ -88,7 +109,8 @@ artifacts-monorepo/
 │   │       ├── routes/auth.ts           # Auth endpoints
 │   │       ├── routes/dashboard.ts      # Dashboard endpoints
 │   │       ├── routes/sessions.ts       # Sessions + leaderboard
-│   │       └── signaling.ts             # WebSocket signaling
+│   │       ├── routes/friends.ts        # Friend system + invitations
+│   │       └── signaling.ts             # WebSocket signaling + presence
 │   └── piano-conservatory/
 │       └── src/
 │           ├── hooks/use-auth.ts        # Auth context + useAuth hook
@@ -101,6 +123,7 @@ artifacts-monorepo/
 │           ├── pages/forgot-password.tsx
 │           ├── pages/reset-password.tsx
 │           ├── pages/dashboard.tsx
+│           ├── pages/friends.tsx         # Friends page
 │           └── pages/room.tsx
 ├── lib/db/                              # Drizzle ORM setup (pool exported)
 └── ...

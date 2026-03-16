@@ -4,6 +4,7 @@ import roomsRouter from "./rooms";
 import sessionsRouter from "./sessions";
 import authRouter from "./auth";
 import dashboardRouter from "./dashboard";
+import friendsRouter from "./friends";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(roomsRouter);
 router.use(sessionsRouter);
 router.use(authRouter);
 router.use(dashboardRouter);
+router.use(friendsRouter);
 
 export default router;

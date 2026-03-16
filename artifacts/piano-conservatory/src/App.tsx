@@ -10,6 +10,7 @@ import SignupPage from "@/pages/signup";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
 import DashboardPage from "@/pages/dashboard";
+import FriendsPage from "@/pages/friends";
 import NotFound from "@/pages/not-found";
 import { AuthCtx, useAuthState } from "@/hooks/use-auth";
 
@@ -38,6 +39,7 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/dashboard" component={DashboardPage} />
+      <Route path="/friends" component={FriendsPage} />
       <Route component={NotFound} />
     </Switch>
   );

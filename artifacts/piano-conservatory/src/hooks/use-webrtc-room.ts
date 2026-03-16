@@ -38,6 +38,7 @@ export function useWebRTCRoom(
   initialAvatarIndex: number,
   providedStream: MediaStream | null,
   initialCustomAvatarUrl?: string,
+  userId?: number,
 ) {
   const myPeerId = useRef(nanoid()).current;
 
@@ -158,6 +159,7 @@ export function useWebRTCRoom(
         type: 'join', roomId, peerId: myPeerId,
         displayName: localData.displayName, avatarIndex: localData.avatarIndex,
         customAvatarUrl: localData.customAvatarUrl,
+        userId,
       }));
     };
 
