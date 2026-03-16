@@ -3,6 +3,38 @@ import { pool } from "@workspace/db";
 import { requireAuth } from "../middleware/auth.js";
 import { getOnlineUserRooms } from "../signaling.js";
 
+interface UserRow {
+  id: number;
+  display_name: string;
+  avatar_index: number;
+  custom_avatar: string | null;
+}
+
+interface FriendshipRow {
+  requester_id: number;
+  addressee_id: number;
+  status: string;
+  id: number;
+}
+
+interface RequestRow extends UserRow {
+  created_at: string;
+}
+
+interface InvitationRow {
+  id: number;
+  room_id: string;
+  created_at: string;
+  expires_at: string;
+  display_name: string;
+  avatar_index: number;
+  custom_avatar: string | null;
+}
+
+interface CountRow {
+  c: string;
+}
+
 const router: IRouter = Router();
 
 router.get("/users/search", requireAuth, async (req, res) => {
@@ -12,7 +44,7 @@ router.get("/users/search", requireAuth, async (req, res) => {
     return;
   }
   try {
-    const result = await pool.query(
+    const result = await pool.query<UserRow>(
       `SELECT id, display_name, avatar_index, custom_avatar
        FROM users
        WHERE id != $1 AND display_name ILIKE $2
@@ -22,7 +54,7 @@ router.get("/users/search", requireAuth, async (req, res) => {
     );
 
     const myId = req.user!.id;
-    const friendshipRows = await pool.query(
+    const friendshipRows = await pool.query<FriendshipRow>(
       `SELECT requester_id, addressee_id, status FROM friendships
        WHERE (requester_id = $1 OR addressee_id = $1)
          AND status IN ('pending', 'accepted')`,
@@ -41,7 +73,7 @@ router.get("/users/search", requireAuth, async (req, res) => {
       }
     }
 
-    const users = result.rows.map((r: any) => ({
+    const users = result.rows.map((r) => ({
       id: r.id,
       displayName: r.display_name,
       avatarIndex: r.avatar_index,
@@ -65,7 +97,7 @@ router.post("/friends/request", requireAuth, async (req, res) => {
   }
 
   try {
-    const existing = await pool.query(
+    const existing = await pool.query<FriendshipRow>(
       `SELECT id, status FROM friendships
        WHERE (requester_id = $1 AND addressee_id = $2)
           OR (requester_id = $2 AND addressee_id = $1)`,
@@ -132,7 +164,7 @@ router.post("/friends/respond", requireAuth, async (req, res) => {
 router.get("/friends", requireAuth, async (req, res) => {
   const myId = req.user!.id;
   try {
-    const result = await pool.query(
+    const result = await pool.query<UserRow>(
       `SELECT u.id, u.display_name, u.avatar_index, u.custom_avatar
        FROM friendships f
        JOIN users u ON u.id = CASE WHEN f.requester_id = $1 THEN f.addressee_id ELSE f.requester_id END
@@ -143,7 +175,7 @@ router.get("/friends", requireAuth, async (req, res) => {
 
     const onlineMap = getOnlineUserRooms();
 
-    const friends = result.rows.map((r: any) => ({
+    const friends = result.rows.map((r) => ({
       id: r.id,
       displayName: r.display_name,
       avatarIndex: r.avatar_index,
@@ -161,7 +193,7 @@ router.get("/friends", requireAuth, async (req, res) => {
 router.get("/friends/requests", requireAuth, async (req, res) => {
   const myId = req.user!.id;
   try {
-    const result = await pool.query(
+    const result = await pool.query<RequestRow>(
       `SELECT u.id, u.display_name, u.avatar_index, u.custom_avatar, f.created_at
        FROM friendships f
        JOIN users u ON u.id = f.requester_id
@@ -169,7 +201,7 @@ router.get("/friends/requests", requireAuth, async (req, res) => {
        ORDER BY f.created_at DESC`,
       [myId]
     );
-    const requests = result.rows.map((r: any) => ({
+    const requests = result.rows.map((r) => ({
       id: r.id,
       displayName: r.display_name,
       avatarIndex: r.avatar_index,
@@ -219,7 +251,7 @@ router.post("/friends/invite", requireAuth, async (req, res) => {
 router.get("/friends/invitations", requireAuth, async (req, res) => {
   const myId = req.user!.id;
   try {
-    const result = await pool.query(
+    const result = await pool.query<InvitationRow>(
       `SELECT ri.id, ri.room_id, ri.created_at, ri.expires_at, u.display_name, u.avatar_index, u.custom_avatar
        FROM room_invitations ri
        JOIN users u ON u.id = ri.from_user_id
@@ -227,7 +259,7 @@ router.get("/friends/invitations", requireAuth, async (req, res) => {
        ORDER BY ri.created_at DESC`,
       [myId]
     );
-    const invitations = result.rows.map((r: any) => ({
+    const invitations = result.rows.map((r) => ({
       id: r.id,
       roomId: r.room_id,
       createdAt: r.created_at,
@@ -265,11 +297,11 @@ router.patch("/friends/invitations/:id/seen", requireAuth, async (req, res) => {
 router.get("/friends/badge-count", requireAuth, async (req, res) => {
   const myId = req.user!.id;
   try {
-    const reqCount = await pool.query(
+    const reqCount = await pool.query<CountRow>(
       `SELECT COUNT(*) as c FROM friendships WHERE addressee_id = $1 AND status = 'pending'`,
       [myId]
     );
-    const invCount = await pool.query(
+    const invCount = await pool.query<CountRow>(
       `SELECT COUNT(*) as c FROM room_invitations WHERE to_user_id = $1 AND seen = false AND expires_at > NOW()`,
       [myId]
     );

@@ -1,4 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { IncomingMessage } from "http";
+import jwt from "jsonwebtoken";
+import { JWT_SECRET, COOKIE_NAME, type AuthUser } from "./middleware/auth.js";
 
 interface PeerInfo {
   ws: WebSocket;
@@ -12,6 +15,30 @@ interface PeerInfo {
 
 const rooms = new Map<string, Map<string, PeerInfo>>();
 
+function parseCookies(cookieHeader: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!cookieHeader) return cookies;
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) {
+      cookies[part.substring(0, eq).trim()] = part.substring(eq + 1).trim();
+    }
+  }
+  return cookies;
+}
+
+function authenticateWs(req: IncomingMessage): number | undefined {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[COOKIE_NAME];
+  if (!token) return undefined;
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as AuthUser;
+    return decoded.id;
+  } catch {
+    return undefined;
+  }
+}
+
 function broadcast(roomId: string, data: object, excludePeerId?: string) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -24,7 +51,8 @@ function broadcast(roomId: string, data: object, excludePeerId?: string) {
 }
 
 export function setupSignaling(wss: WebSocketServer) {
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    const authenticatedUserId = authenticateWs(req);
     let currentPeer: PeerInfo | null = null;
 
     ws.on("message", async (raw) => {
@@ -38,14 +66,14 @@ export function setupSignaling(wss: WebSocketServer) {
       const type = msg.type as string;
 
       if (type === "join") {
-        const { roomId, peerId, displayName, avatarIndex, customAvatarUrl, userId } = msg as {
-          roomId: string; peerId: string; displayName: string; avatarIndex: number; customAvatarUrl?: string; userId?: number;
+        const { roomId, peerId, displayName, avatarIndex, customAvatarUrl } = msg as {
+          roomId: string; peerId: string; displayName: string; avatarIndex: number; customAvatarUrl?: string;
         };
 
         if (!rooms.has(roomId)) rooms.set(roomId, new Map());
         const room = rooms.get(roomId)!;
 
-        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, customAvatarUrl, userId };
+        currentPeer = { ws, peerId, roomId, displayName, avatarIndex, customAvatarUrl, userId: authenticatedUserId };
         room.set(peerId, currentPeer);
 
         const existingPeers = Array.from(room.values())
