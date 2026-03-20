@@ -276,7 +276,7 @@ router.get("/friends/invitations", requireAuth, async (req, res) => {
 });
 
 router.patch("/friends/invitations/:id/seen", requireAuth, async (req, res) => {
-  const invId = parseInt(req.params.id, 10);
+  const invId = parseInt(String(req.params.id), 10);
   const myId = req.user!.id;
   if (isNaN(invId)) {
     res.status(400).json({ error: "Invalid invitation id" });

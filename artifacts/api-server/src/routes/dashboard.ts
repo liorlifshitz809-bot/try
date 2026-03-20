@@ -104,7 +104,7 @@ router.post("/dashboard/sessions", requireAuth, async (req, res) => {
 // DELETE /api/dashboard/sessions/:id
 router.delete("/dashboard/sessions/:id", requireAuth, async (req, res) => {
   const userId = req.user!.id;
-  const sessionId = parseInt(req.params.id);
+  const sessionId = parseInt(String(req.params.id), 10);
   if (!sessionId) {
     res.status(400).json({ error: "Invalid session id" });
     return;
